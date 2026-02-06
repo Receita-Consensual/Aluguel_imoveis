@@ -4,6 +4,8 @@ import pandas as pd
 import folium
 from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
 import random
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
@@ -14,7 +16,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Chaves (Para facilitar)
 SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
 SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
 
@@ -42,6 +43,13 @@ st.markdown("""
     .map-card {background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 220px !important; overflow: hidden; font-family: 'Roboto', sans-serif; text-align: left;}
     .btn-maps {display: block; margin-top: 10px; text-align: center; background: #1a73e8; color: white !important; padding: 8px; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 13px;}
     .btn-maps:hover {background: #1558b0;}
+    
+    /* Estilo do Input de Busca */
+    div[data-testid="stTextInput"] input {
+        border-radius: 20px;
+        border: 1px solid #dfe1e5;
+        padding-left: 15px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -59,35 +67,23 @@ supabase = init_connection()
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_plan' not in st.session_state: st.session_state['user_plan'] = 'free'
 
-# --- 4. FUNÇÃO DE DADOS (COM FILTRO DE LINK RUIM) ---
+# --- 4. FUNÇÃO DE DADOS (CACHEADA) ---
 @st.cache_data(ttl=60)
-def carregar_dados_limpos(preco_max, cidade_filtro):
+def carregar_dados_base():
     if not supabase: return pd.DataFrame()
     try:
-        # Traz bastante dados para filtrar depois
         response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(2000).execute()
         df_raw = pd.DataFrame(response.data)
         if df_raw.empty: return pd.DataFrame()
 
-        # --- FILTRO DE SEGURANÇA DE LINK ---
-        # Só deixa passar links que tenham padrão de imóvel
-        # Idealista tem /imovel/, Imovirtual tem /anuncio/
+        # Filtro de Link Bom
         def link_eh_bom(url):
             url = str(url).lower()
-            if "/imovel/" in url: return True
-            if "/anuncio/" in url: return True
-            if ".htm" in url: return True
-            return False 
+            return "/imovel/" in url or "/anuncio/" in url or ".htm" in url
         
-        # Aplica o filtro: Joga fora tudo que não for link bom
         df_raw = df_raw[df_raw['link'].apply(link_eh_bom)]
         
-        # Filtros de UI
-        df = df_raw[df_raw['preco'] <= preco_max]
-        if cidade_filtro != "Todas":
-            df = df[df['endereco'].str.contains(cidade_filtro, case=False, na=False)]
-            
-        # Correção Lat/Lon
+        # Correção Lat/Lon com Ruído
         def corrigir_lat(row):
             if row['lat'] != 0: return row['lat']
             end = str(row['endereco']).lower()
@@ -102,13 +98,24 @@ def carregar_dados_limpos(preco_max, cidade_filtro):
                 if c in end: return coords[1] + random.uniform(-0.02, 0.02)
             return -8.0
 
-        df['lat'] = df.apply(corrigir_lat, axis=1)
-        df['lon'] = df.apply(corrigir_lon, axis=1)
-        return df
+        df_raw['lat'] = df_raw.apply(corrigir_lat, axis=1)
+        df_raw['lon'] = df_raw.apply(corrigir_lon, axis=1)
+        return df_raw
     except:
         return pd.DataFrame()
 
-# --- 5. BARRA LATERAL ---
+# --- 5. LÓGICA DE BUSCA GEOGRÁFICA ---
+def geolocalizar(endereco):
+    try:
+        geolocator = Nominatim(user_agent="receita_imob_app_v2")
+        # Força busca em Portugal
+        loc = geolocator.geocode(f"{endereco}, Portugal")
+        if loc: return (loc.latitude, loc.longitude), loc.address
+        return None, None
+    except:
+        return None, None
+
+# --- 6. INTERFACE ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
     st.markdown("### Receita Imob")
@@ -131,21 +138,64 @@ with st.sidebar:
         if st.button("Sair"):
             st.session_state['logged_in'] = False
             st.rerun()
-
     st.divider()
-    opcoes_cidades = ["Todas"] + [k.capitalize() for k in sorted(COORDS_FIXAS.keys())]
-    filtro_cidade = st.selectbox("📍 Filtrar Cidade", opcoes_cidades)
-    filtro_preco = st.slider("💰 Preço Máximo", 0, 5000, 2500)
 
-# --- 6. MAPA ---
-df = carregar_dados_limpos(filtro_preco, filtro_cidade)
+# CARREGA BASE
+df_base = carregar_dados_base()
 
-if not df.empty and filtro_cidade != "Todas":
-    center = [df['lat'].mean(), df['lon'].mean()]
-    zoom = 13
-elif not df.empty:
-    center = [39.6, -8.0]
-    zoom = 7
+# --- ÁREA DE BUSCA INTELIGENTE ---
+col_search, col_radius, col_price = st.columns([3, 1, 1])
+
+with col_search:
+    termo_busca = st.text_input("🔍 Perto de onde?", placeholder="Ex: Hospital de Aveiro, Bosch Ovar, Forum Coimbra...")
+
+with col_radius:
+    raio_km = st.slider("Raio (km)", 1, 20, 3)
+
+with col_price:
+    filtro_preco = st.slider("Max €", 0, 5000, 2000)
+
+# PROCESSAMENTO DE FILTROS
+df_final = pd.DataFrame()
+ponto_central = None
+endereco_encontrado = None
+
+if not df_base.empty:
+    df_temp = df_base[df_base['preco'] <= filtro_preco]
+    
+    # Se usuário digitou um local
+    if termo_busca:
+        coords_busca, endereco_encontrado = geolocalizar(termo_busca)
+        
+        if coords_busca:
+            ponto_central = coords_busca
+            st.success(f"📍 Localizado: **{endereco_encontrado}**")
+            
+            # FILTRO MATEMÁTICO DE DISTÂNCIA
+            def calcular_distancia(row):
+                # Se o imóvel está em "lat 39.5" (fallback), ignora
+                if row['lat'] == 39.5: return 9999
+                return geodesic(coords_busca, (row['lat'], row['lon'])).km
+            
+            df_temp['distancia'] = df_temp.apply(calcular_distancia, axis=1)
+            df_final = df_temp[df_temp['distancia'] <= raio_km]
+            
+            if df_final.empty:
+                st.warning(f"Nenhum imóvel encontrado num raio de {raio_km}km daqui.")
+        else:
+            st.error("Local não encontrado. Tente ser mais específico (ex: 'Rua X, Aveiro').")
+            df_final = df_temp # Mostra tudo se falhar a busca
+    else:
+        # Se não buscou nada específico, mostra tudo
+        df_final = df_temp
+
+# --- 7. MAPA ---
+if ponto_central:
+    center = ponto_central
+    zoom = 14
+elif not df_final.empty:
+    center = [df_final['lat'].mean(), df_final['lon'].mean()]
+    zoom = 8
 else:
     center = [39.6, -8.0]
     zoom = 7
@@ -154,17 +204,37 @@ m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", control_
 LocateControl().add_to(m)
 Fullscreen().add_to(m)
 
+# SE TIVER BUSCA, DESENHA O PONTO CENTRAL (TRABALHO/LOCAL)
+if ponto_central:
+    folium.Marker(
+        ponto_central,
+        popup=f"📍 {termo_busca}",
+        icon=folium.Icon(color="black", icon="briefcase", prefix="fa"),
+        tooltip="Seu Ponto de Interesse"
+    ).add_to(m)
+    
+    # Desenha o círculo do raio
+    folium.Circle(
+        location=ponto_central,
+        radius=raio_km * 1000,
+        color="#3388ff",
+        fill=True,
+        fill_opacity=0.1
+    ).add_to(m)
+
+# DESENHA OS IMÓVEIS
 marker_cluster = MarkerCluster().add_to(m)
 
-if not df.empty:
-    for _, row in df.iterrows():
-        if row['lat'] != 0: 
+if not df_final.empty:
+    for _, row in df_final.iterrows():
+        if row['lat'] != 39.5: # Ignora os sem local
             img = row.get('imagem')
             if not img or str(img) == 'nan': 
                 img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
             
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             titulo_curto = str(row.get('titulo', 'Imóvel'))[:50]
+            dist_txt = f"📏 {row['distancia']:.1f} km" if 'distancia' in row else ""
             
             html = f"""
             <div class="map-card">
@@ -172,7 +242,10 @@ if not df.empty:
                     <div style="width: 100%; height: 120px; background-image: url('{img}'); background-size: cover; background-position: center;"></div>
                 </a>
                 <div class="map-info">
-                    <div style="color: #1a73e8; font-weight: bold; font-size: 16px;">{preco}</div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color: #1a73e8; font-weight: bold; font-size: 16px;">{preco}</span>
+                        <span style="font-size: 12px; color: #666;">{dist_txt}</span>
+                    </div>
                     <div style="font-size: 13px; color: #333; margin: 5px 0; line-height: 1.2;">{titulo_curto}...</div>
                     <a href="{row.get('link')}" target="_blank" class="btn-maps">Ver Anúncio</a>
                 </div>
