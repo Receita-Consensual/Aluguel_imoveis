@@ -14,11 +14,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Chaves Supabase (Hardcoded para funcionar no copy-paste)
+# Chaves (Para facilitar)
 SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
 SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
 
-# Coordenadas Fixas de Cidades (Para corrigir imóveis sem GPS)
 COORDS_FIXAS = {
     "aveiro": [40.6405, -8.6538],
     "porto": [41.1579, -8.6291],
@@ -35,37 +34,13 @@ COORDS_FIXAS = {
     "gaia": [41.1333, -8.6167]
 }
 
-# CSS Estilo Google Maps
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
     html, body, [class*="css"] {font-family: 'Roboto', sans-serif;}
     #MainMenu, footer, header {visibility: hidden;}
-    
-    /* Estilo do Card no Mapa */
-    .map-card {
-        background: white; 
-        border-radius: 8px; 
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        width: 220px !important;
-        overflow: hidden; 
-        font-family: 'Roboto', sans-serif;
-        text-align: left;
-    }
-    
-    /* Botão Ver Anúncio */
-    .btn-maps {
-        display: block; 
-        margin-top: 10px; 
-        text-align: center; 
-        background: #1a73e8; 
-        color: white !important; 
-        padding: 8px; 
-        border-radius: 4px; 
-        text-decoration: none; 
-        font-weight: 500;
-        font-size: 13px;
-    }
+    .map-card {background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 220px !important; overflow: hidden; font-family: 'Roboto', sans-serif; text-align: left;}
+    .btn-maps {display: block; margin-top: 10px; text-align: center; background: #1a73e8; color: white !important; padding: 8px; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 13px;}
     .btn-maps:hover {background: #1558b0;}
     </style>
     """, unsafe_allow_html=True)
@@ -84,26 +59,35 @@ supabase = init_connection()
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_plan' not in st.session_state: st.session_state['user_plan'] = 'free'
 
-# --- 4. FUNÇÃO DE DADOS BLINDADA (CACHE 60s) ---
-# O TTL 60 impede que o mapa fique piscando
+# --- 4. FUNÇÃO DE DADOS (COM FILTRO DE LINK RUIM) ---
 @st.cache_data(ttl=60)
-def carregar_dados_estaveis(preco_max, cidade_filtro):
+def carregar_dados_limpos(preco_max, cidade_filtro):
     if not supabase: return pd.DataFrame()
     try:
-        # Busca até 2000 imóveis
+        # Traz bastante dados para filtrar depois
         response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(2000).execute()
         df_raw = pd.DataFrame(response.data)
         if df_raw.empty: return pd.DataFrame()
+
+        # --- FILTRO DE SEGURANÇA DE LINK ---
+        # Só deixa passar links que tenham padrão de imóvel
+        # Idealista tem /imovel/, Imovirtual tem /anuncio/
+        def link_eh_bom(url):
+            url = str(url).lower()
+            if "/imovel/" in url: return True
+            if "/anuncio/" in url: return True
+            if ".htm" in url: return True
+            return False 
         
-        # Filtros
-        df = df_raw.copy()
-        if 'preco' in df.columns:
-            df = df[df['preco'] <= preco_max]
+        # Aplica o filtro: Joga fora tudo que não for link bom
+        df_raw = df_raw[df_raw['link'].apply(link_eh_bom)]
         
+        # Filtros de UI
+        df = df_raw[df_raw['preco'] <= preco_max]
         if cidade_filtro != "Todas":
             df = df[df['endereco'].str.contains(cidade_filtro, case=False, na=False)]
             
-        # Correção Lat/Lon com "Ruído" Fixo (dentro do cache)
+        # Correção Lat/Lon
         def corrigir_lat(row):
             if row['lat'] != 0: return row['lat']
             end = str(row['endereco']).lower()
@@ -154,9 +138,8 @@ with st.sidebar:
     filtro_preco = st.slider("💰 Preço Máximo", 0, 5000, 2500)
 
 # --- 6. MAPA ---
-df = carregar_dados_estaveis(filtro_preco, filtro_cidade)
+df = carregar_dados_limpos(filtro_preco, filtro_cidade)
 
-# Foco do Mapa
 if not df.empty and filtro_cidade != "Todas":
     center = [df['lat'].mean(), df['lon'].mean()]
     zoom = 13
@@ -175,7 +158,6 @@ marker_cluster = MarkerCluster().add_to(m)
 
 if not df.empty:
     for _, row in df.iterrows():
-        # Só exibe se estiver em Portugal (lat diferente de 0 absoluto)
         if row['lat'] != 0: 
             img = row.get('imagem')
             if not img or str(img) == 'nan': 
@@ -184,31 +166,22 @@ if not df.empty:
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             titulo_curto = str(row.get('titulo', 'Imóvel'))[:50]
             
-            # HTML DO POPUP CORRIGIDO (FOTO COMO BACKGROUND)
             html = f"""
             <div class="map-card">
                 <a href="{row.get('link')}" target="_blank" style="text-decoration:none;">
-                    <div style="
-                        width: 100%; 
-                        height: 120px; 
-                        background-image: url('{img}'); 
-                        background-size: cover; 
-                        background-position: center;
-                    "></div>
+                    <div style="width: 100%; height: 120px; background-image: url('{img}'); background-size: cover; background-position: center;"></div>
                 </a>
                 <div class="map-info">
                     <div style="color: #1a73e8; font-weight: bold; font-size: 16px;">{preco}</div>
                     <div style="font-size: 13px; color: #333; margin: 5px 0; line-height: 1.2;">{titulo_curto}...</div>
-                    <a href="{row.get('link')}" target="_blank" class="btn-maps">
-                        Ver Anúncio
-                    </a>
+                    <a href="{row.get('link')}" target="_blank" class="btn-maps">Ver Anúncio</a>
                 </div>
             </div>
             """
             
             folium.Marker(
                 [row['lat'], row['lon']],
-                popup=folium.Popup(html, max_width=240), # Fixa largura para não quebrar
+                popup=folium.Popup(html, max_width=240),
                 icon=folium.Icon(color="blue", icon="home", prefix="fa")
             ).add_to(marker_cluster)
 
