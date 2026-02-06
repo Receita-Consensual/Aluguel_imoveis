@@ -20,6 +20,7 @@ st.set_page_config(
 SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
 SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
 
+# Coordenadas de Segurança
 COORDS_FIXAS = {
     "aveiro": [40.6405, -8.6538],
     "porto": [41.1579, -8.6291],
@@ -36,6 +37,42 @@ COORDS_FIXAS = {
     "gaia": [41.1333, -8.6167]
 }
 
+# BANCO DE DADOS DE LOCAIS ESTRATÉGICOS (PARA AUTOCOMPLETE FAKE)
+LUGARES_VIP = [
+    "📍 Digitar Outro Local Manualmente...",
+    "🏢 Altice Labs (Aveiro)",
+    "🏭 Bosch (Ovar)",
+    "🏭 Bosch (Braga)",
+    "🏭 Autoeuropa (Palmela)",
+    "🎓 Universidade de Aveiro",
+    "🎓 Universidade do Porto (Pólo Asprela)",
+    "🎓 Universidade de Coimbra (Pólo I)",
+    "🎓 Universidade do Minho (Gualtar)",
+    "🎓 Instituto Superior Técnico (Lisboa)",
+    "🏥 Hospital de São João (Porto)",
+    "🏥 Hospital de Santo António (Porto)",
+    "🏥 Hospital da Luz (Aveiro)",
+    "🏥 Hospital de Santa Maria (Lisboa)",
+    "🏥 CHUC (Hospitais da Universidade de Coimbra)",
+    "🛍️ Glicínias Plaza (Aveiro)",
+    "🛍️ Forum Aveiro",
+    "🛍️ NorteShopping (Matosinhos)",
+    "🛍️ Colombo (Lisboa)",
+    "🛍️ Vasco da Gama (Lisboa)",
+    "🛍️ Braga Parque",
+    "✈️ Aeroporto do Porto (Sá Carneiro)",
+    "✈️ Aeroporto de Lisboa (Humberto Delgado)",
+    "✈️ Aeroporto de Faro",
+    "🏙️ Torre dos Clérigos (Porto)",
+    "🏙️ Marquês de Pombal (Lisboa)",
+    "🏙️ Parque das Nações (Lisboa)",
+    "🏙️ Avenida dos Aliados (Porto)",
+    "💼 Farfetch (Matosinhos)",
+    "💼 Critical Techworks (Porto)",
+    "💼 Blip (Porto)",
+    "💼 Feedzai (Lisboa)"
+]
+
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
@@ -45,14 +82,10 @@ st.markdown("""
     .btn-maps {display: block; margin-top: 10px; text-align: center; background: #1a73e8; color: white !important; padding: 8px; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 13px;}
     .btn-maps:hover {background: #1558b0;}
     
-    /* Estilo PRO */
-    .pro-lock {
-        background-color: #f8f9fa;
-        border: 1px dashed #ccc;
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-        color: #666;
+    /* Estilo para Dropdown */
+    div[data-baseweb="select"] > div {
+        border-radius: 12px;
+        border-color: #dfe1e5;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -83,7 +116,6 @@ def carregar_dados_base():
         
         df_raw = df_raw[df_raw['link'].apply(link_eh_bom)]
         
-        # Correção Lat/Lon
         def corrigir_lat(row):
             if row['lat'] != 0: return row['lat']
             end = str(row['endereco']).lower()
@@ -105,18 +137,20 @@ def carregar_dados_base():
 
 def geolocalizar(endereco):
     try:
-        geolocator = Nominatim(user_agent="receita_imob_pro")
-        loc = geolocator.geocode(f"{endereco}, Portugal")
+        # Remove emojis para buscar no Nominatim
+        clean_address = endereco.replace("📍 ", "").replace("🏢 ", "").replace("🏭 ", "").replace("🎓 ", "").replace("🏥 ", "").replace("🛍️ ", "").replace("✈️ ", "").replace("🏙️ ", "").replace("💼 ", "")
+        
+        geolocator = Nominatim(user_agent="receita_imob_pro_v2")
+        loc = geolocator.geocode(f"{clean_address}, Portugal")
         if loc: return (loc.latitude, loc.longitude), loc.address
         return None, None
     except: return None, None
 
-# --- 5. INTERFACE & LOGICA FREE vs PRO ---
+# --- 5. INTERFACE & SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
     st.markdown("### Receita Imob")
     
-    # Login
     if not st.session_state['logged_in']:
         with st.expander("🔐 Entrar (Membros)"):
             email = st.text_input("Email")
@@ -138,48 +172,56 @@ with st.sidebar:
     
     st.divider()
     
-    # LISTA DE VANTAGENS (MARKETING)
     if st.session_state['user_plan'] == 'free':
         st.info("🔒 **Vantagens do PRO:**")
-        st.markdown("""
-        - 🎯 **Busca por Local de Trabalho** (ex: Altice, Bosch)
-        - 📏 **Filtro de Raio** (ex: 2km a pé)
-        - ⚡ **Alertas em Tempo Real**
-        """)
+        st.markdown("- 🎯 **Busca Rápida** (Altice, Bosch, etc)")
+        st.markdown("- 📏 **Raio Personalizado**")
+        st.markdown("- ⚡ **Autocompletar Inteligente**")
         st.markdown("---")
         opcoes_cidades = ["Todas"] + [k.capitalize() for k in sorted(COORDS_FIXAS.keys())]
-        filtro_cidade = st.selectbox("📍 Filtrar por Cidade (Grátis)", opcoes_cidades)
+        filtro_cidade = st.selectbox("📍 Filtrar por Cidade", opcoes_cidades)
     else:
-        st.success("💎 **Benefícios PRO Ativos**")
-        st.markdown("- Busca por Raio: **Liberada**")
-        st.markdown("- Alertas: **Ativos**")
+        st.success("💎 **Modo PRO Ativo**")
 
 # CARREGA BASE
 df_base = carregar_dados_base()
 
-# --- ÁREA DE BUSCA (AQUI É A MÁGICA) ---
+# --- ÁREA DE BUSCA ---
 ponto_central = None
 termo_busca = None
 raio_km = 5
 filtro_preco = 2500
 
 if st.session_state['user_plan'] == 'pro':
-    # --- INTERFACE PRO (COMPLETA) ---
+    # --- INTERFACE PRO (AUTOCOMPLETE) ---
     with st.container(border=True):
         c1, c2, c3 = st.columns([3, 1, 1])
         with c1:
-            termo_busca = st.text_input("🏢 Onde você vai trabalhar/estudar?", placeholder="Ex: Altice Labs, Universidade de Aveiro...")
+            # SELECTBOX COM PESQUISA (FUNCIONA COMO AUTOCOMPLETE)
+            escolha_local = st.selectbox(
+                "🏢 Onde você vai trabalhar/estudar?", 
+                options=LUGARES_VIP,
+                index=None, # Começa vazio
+                placeholder="Digite para buscar (Ex: Altice, Bosch...)"
+            )
+            
+            # Se escolher "Outro", abre caixa de texto
+            if escolha_local == "📍 Digitar Outro Local Manualmente...":
+                termo_busca = st.text_input("Digite o endereço exato:", placeholder="Rua do Ouro, Lisboa")
+            elif escolha_local:
+                termo_busca = escolha_local
+
         with c2:
             raio_km = st.slider("Raio (km)", 1, 15, 3)
         with c3:
             filtro_preco = st.slider("Max €", 0, 5000, 2000)
 else:
-    # --- INTERFACE FREE (BLOQUEADA) ---
+    # --- INTERFACE FREE ---
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
             st.text_input("🏢 Onde você trabalha?", placeholder="🔒 Exclusivo PRO (Ex: Altice, Hospital...)", disabled=True)
-            st.caption("🔒 Usuários Free buscam apenas por Cidade na barra lateral.")
+            st.caption("🔒 Faça upgrade para buscar por Pontos de Interesse.")
         with c2:
             filtro_preco = st.slider("Max €", 0, 5000, 2000)
 
@@ -189,12 +231,14 @@ df_final = pd.DataFrame()
 if not df_base.empty:
     df_temp = df_base[df_base['preco'] <= filtro_preco]
     
-    # LÓGICA PRO (RAIO)
     if st.session_state['user_plan'] == 'pro' and termo_busca:
         coords_busca, endereco_encontrado = geolocalizar(termo_busca)
         if coords_busca:
             ponto_central = coords_busca
-            st.success(f"📍 Centralizado em: **{endereco_encontrado}**")
+            if "Outro" not in str(termo_busca):
+                st.success(f"📍 Localizado: **{termo_busca}**")
+            else:
+                st.success(f"📍 Localizado: **{endereco_encontrado}**")
             
             def calcular_distancia(row):
                 if row['lat'] == 39.5: return 9999
@@ -203,19 +247,17 @@ if not df_base.empty:
             df_temp['distancia'] = df_temp.apply(calcular_distancia, axis=1)
             df_final = df_temp[df_temp['distancia'] <= raio_km]
             
-            if df_final.empty: st.warning(f"Nada encontrado a {raio_km}km daqui.")
+            if df_final.empty: st.warning(f"Nada a {raio_km}km daqui. Aumente o raio!")
         else:
-            st.error("Local não encontrado.")
+            st.error("Endereço não encontrado no mapa.")
             df_final = df_temp
-            
-    # LÓGICA FREE (CIDADE)
     else:
         if st.session_state['user_plan'] == 'free' and 'filtro_cidade' in locals() and filtro_cidade != "Todas":
              df_final = df_temp[df_temp['endereco'].str.contains(filtro_cidade, case=False, na=False)]
         else:
              df_final = df_temp
 
-# --- 6. MAPA ---
+# --- MAPA ---
 if ponto_central:
     center = ponto_central
     zoom = 14
@@ -230,12 +272,10 @@ m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", control_
 LocateControl().add_to(m)
 Fullscreen().add_to(m)
 
-# DESENHA RAIO (SÓ PRO)
 if ponto_central:
     folium.Marker(ponto_central, popup=f"📍 {termo_busca}", icon=folium.Icon(color="black", icon="briefcase", prefix="fa")).add_to(m)
     folium.Circle(location=ponto_central, radius=raio_km * 1000, color="#3388ff", fill=True, fill_opacity=0.1).add_to(m)
 
-# PINS
 marker_cluster = MarkerCluster().add_to(m)
 if not df_final.empty:
     for _, row in df_final.iterrows():
@@ -244,8 +284,6 @@ if not df_final.empty:
             if not img or str(img) == 'nan': img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             titulo_curto = str(row.get('titulo', 'Imóvel'))[:50]
-            
-            # Mostra distância no card se for PRO
             dist_tag = ""
             if 'distancia' in row: dist_tag = f"<span style='font-size:11px; color:green;'>🚶 {row['distancia']:.1f}km</span>"
             
