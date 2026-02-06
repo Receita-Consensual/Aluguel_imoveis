@@ -8,131 +8,111 @@ from geopy.geocoders import Nominatim
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
-    page_title="Lugar",
+    page_title="Lugar | Beta",
     page_icon="📍",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS "SUPER VIBRANT" & LIMPEZA TOTAL
+# --- CSS DE "ALTA COSTURA" (DESIGN PREMIUM) ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap');
     
-    /* Fonte Moderna */
     html, body, [class*="css"] {font-family: 'Poppins', sans-serif;}
+
+    /* --- 1. O FUNDO "PLATINUM BLUE" (COR SUAVE E MODERNA) --- */
+    .stApp {
+        background: linear-gradient(135deg, #E0EAFC 0%, #CFDEF3 100%);
+        background-attachment: fixed;
+    }
     
-    /* --- 🚫 ZONA DE EXTERMÍNIO DE MENUS 🚫 --- */
-    #MainMenu {display: none !important;}
-    footer {display: none !important;}
-    header {display: none !important;}
-    div[data-testid="stToolbar"] {display: none !important;}
+    /* --- 2. LIMPEZA TOTAL --- */
+    #MainMenu, footer, header, div[data-testid="stToolbar"] {display: none !important;}
     .stDeployButton {display: none !important;}
-    [data-testid="stDecoration"] {display: none !important;}
-    [data-testid="stStatusWidget"] {display: none !important;}
     
-    /* --- CORES E VIDA --- */
-    
-    /* Título com Gradiente (O efeito "Uau") */
+    /* --- 3. LOGO E TÍTULO --- */
+    .brand-container {
+        text-align: center;
+        padding: 10px 0;
+        margin-bottom: 20px;
+    }
     .brand-text {
-        background: linear-gradient(45deg, #820AD1, #FF0080);
+        background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-size: 3.5rem;
         font-weight: 800;
-        margin-bottom: -10px;
+        letter-spacing: -2px;
     }
-    
-    /* Subtítulo */
+    .brand-badge {
+        background-color: #2575fc;
+        color: white;
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        vertical-align: middle;
+        margin-left: 10px;
+        box-shadow: 0 4px 10px rgba(37, 117, 252, 0.3);
+    }
     .brand-sub {
-        color: #555;
-        font-size: 1.2rem;
-        font-weight: 400;
-        margin-bottom: 25px;
+        color: #444;
+        font-size: 1.1rem;
+        font-weight: 500;
+        margin-top: -10px;
     }
 
-    /* Botão Principal (Gradiente Vibrante) */
+    /* --- 4. GLASSMORPHISM (CAIXAS DE VIDRO) --- */
+    div[data-testid="stVerticalBlock"] > div {
+        background: rgba(255, 255, 255, 0.75); /* Mais opaco para leitura */
+        backdrop-filter: blur(12px);
+        border-radius: 20px;
+        padding: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    }
+
+    /* --- 5. BOTÕES E INPUTS --- */
     .stButton>button {
-        background: linear-gradient(90deg, #820AD1 0%, #E6007A 100%);
+        background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
         color: white;
         border: none;
         border-radius: 12px;
-        height: 3.5em;
-        font-weight: 700;
-        font-size: 16px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(230, 0, 122, 0.3);
+        height: 3em; /* Altura ajustada para alinhar */
+        font-weight: 600;
+        box-shadow: 0 4px 15px rgba(37, 117, 252, 0.4);
         width: 100%;
     }
-    
     .stButton>button:hover {
         transform: scale(1.02);
-        box-shadow: 0 6px 20px rgba(230, 0, 122, 0.5);
         color: white;
     }
-
-    /* Inputs (Caixas de Texto Arredondadas) */
+    
+    /* Inputs */
     .stTextInput>div>div>input {
         border-radius: 12px;
-        border: 2px solid #eee;
+        border: 1px solid #ccc;
         padding: 10px;
-    }
-    .stTextInput>div>div>input:focus {
-        border-color: #820AD1;
-        box-shadow: 0 0 10px rgba(130, 10, 209, 0.1);
+        height: 3em; /* Mesma altura do botão */
     }
 
-    /* Card do Mapa (Estilo Airbnb Moderno) */
+    /* --- 6. POPUPS DO MAPA --- */
     .popup-card {
-        width: 240px;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-        background: white;
-        font-family: 'Poppins', sans-serif;
+        width: 220px; border-radius: 12px; overflow: hidden; 
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1); background: white;
     }
-    .popup-img {
-        width: 100%;
-        height: 140px;
-        object-fit: cover;
+    .popup-img { width: 100%; height: 130px; object-fit: cover; }
+    .popup-body { padding: 12px; }
+    .popup-price { color: #6a11cb; font-weight: 800; font-size: 18px; }
+    .popup-btn { 
+        display: block; background: #222; color: white; text-align: center; 
+        padding: 8px; border-radius: 8px; text-decoration: none; font-size: 12px; margin-top: 8px;
     }
-    .popup-body {
-        padding: 15px;
-    }
-    .popup-price {
-        color: #820AD1;
-        font-weight: 800;
-        font-size: 20px;
-    }
-    .popup-badge {
-        background: #E6007A;
-        color: white;
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 10px;
-        font-weight: bold;
-        text-transform: uppercase;
-        display: inline-block;
-        margin-bottom: 5px;
-    }
-    .popup-btn {
-        display: block;
-        background: black;
-        color: white;
-        text-align: center;
-        padding: 10px;
-        border-radius: 10px;
-        text-decoration: none;
-        font-weight: 600;
-        margin-top: 10px;
-        transition: background 0.2s;
-    }
-    .popup-btn:hover { background: #333; }
-    
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO & CACHE ---
+# --- CONEXÃO ---
 @st.cache_resource
 def init_connection():
     try: return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -144,84 +124,84 @@ supabase = init_connection()
 def carregar_dados():
     if not supabase: return pd.DataFrame()
     try:
-        # Pega dados e garante que não tem lat 0
         response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(600).execute()
         return pd.DataFrame(response.data)
     except: return pd.DataFrame()
 
-# --- 3. SIDEBAR (Discreta) ---
+# --- SIDEBAR (FEEDBACK) ---
 with st.sidebar:
-    st.markdown("### 🐞 Central Beta")
+    st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=50)
+    st.markdown("### Ajude a Construir")
     with st.form("bug_report"):
-        st.write("Viu algo estranho?")
-        msg = st.text_area("Descreva aqui")
-        if st.form_submit_button("Enviar Report") and supabase:
-            supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": msg, "ativo": False, "plano": "beta_vibrant"}).execute()
-            st.success("Recebido!")
+        desc = st.text_area("Encontrou algum erro?")
+        if st.form_submit_button("📢 Avisar a Equipe") and supabase:
+            supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": desc, "ativo": False, "plano": "beta_glass"}).execute()
+            st.success("Obrigado!")
 
-# --- 4. HEADER (LOGO VIBRANTE) ---
-c1, c2 = st.columns([1, 12])
+# --- HEADER ---
+c1, c2, c3 = st.columns([1, 8, 1])
 with c2:
-    st.markdown('<div class="brand-text">Lugar</div>', unsafe_allow_html=True)
-    st.markdown('<div class="brand-sub">Encontre o seu canto em Portugal.</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="brand-container">
+        <span class="brand-text">Lugar</span><span class="brand-badge">BETA ABERTO</span>
+        <div class="brand-sub">O jeito mais rápido de encontrar casa em Portugal.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 df_total = carregar_dados()
 
-# --- 5. BUSCA (SEM TRAVAMENTOS) ---
-# Usamos container para agrupar e dar destaque
-with st.container():
-    c_search, c_type, c_btn = st.columns([3, 1, 1])
-    
-    with c_search:
-        # Ícone de lupa no placeholder
-        local_input = st.text_input("Para onde vamos?", placeholder="🔍 Ex: Lefties Aveiro, Trindade Porto...")
-    
-    with c_type:
-        st.write("") 
-        tipos = st.multiselect("Filtro", ["T1", "T2", "T3", "Quarto"], default=["T1", "T2"], label_visibility="collapsed")
+# --- BUSCA ALINHADA (O CORRETOR DE ALINHAMENTO) ---
+st.write("") 
+c_spacer_l, c_main, c_spacer_r = st.columns([1, 10, 1])
 
-    with c_btn:
-        st.write("") 
-        # O botão agora tem aquele gradiente roxo/rosa definido no CSS
-        buscar = st.button("Buscar Agora")
+with c_main:
+    with st.container():
+        # vertical_alignment="bottom" É O SEGREDO PARA ALINHAR O BOTÃO COM A CAIXA
+        c_search, c_type, c_btn = st.columns([5, 2, 2], vertical_alignment="bottom")
+        
+        with c_search:
+            local_input = st.text_input("Onde você quer viver?", placeholder="Ex: Lefties Aveiro, Hospital São João...")
+        
+        with c_type:
+            tipos = st.multiselect("Tipo", ["T1", "T2", "T3", "Quarto", "Casa"], default=["T1", "T2"], label_visibility="hidden") # Hidden esconde o label "Tipo" para alinhar melhor
 
-# --- 6. MAPA COLORIDO ---
+        with c_btn:
+            buscar = st.button("🔍 Buscar Agora")
+
+# --- MAPA INTELIGENTE ---
 map_center = [39.55, -7.85] 
 zoom_start = 7
 ponto_referencia = None
 
-# Lógica GPS (Só roda no clique = Rápido)
 if buscar and local_input:
-    geolocator = Nominatim(user_agent="lugar_vibrant_v1")
+    geolocator = Nominatim(user_agent="lugar_final_beta")
     try:
         loc = geolocator.geocode(f"{local_input}, Portugal", timeout=10)
         if loc:
             map_center = [loc.latitude, loc.longitude]
             zoom_start = 15
             ponto_referencia = loc
+            st.toast(f"📍 Indo para: {loc.address}")
         else:
-            st.warning("Local não encontrado exato. Mostrando mapa geral.")
+            st.warning("Local não encontrado. Mostrando visão geral.")
     except:
-        st.error("Erro de conexão. Tente novamente.")
+        st.error("Erro de conexão.")
 
-st.write("") 
+st.write("")
 
-# USANDO "OpenStreetMap" PARA CORES VIVAS (Verde é verde, mar é azul)
+# Mapa OpenStreetMap
 m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="OpenStreetMap")
 LocateControl(auto_start=True).add_to(m)
 Fullscreen().add_to(m)
 
-# 1. SEU DESTINO (Pino Preto Grande)
 if ponto_referencia:
     folium.Marker(
         [ponto_referencia.latitude, ponto_referencia.longitude],
-        popup=f"<b>🎯 SEU DESTINO</b>",
+        popup=f"<b>📍 SEU DESTINO</b>",
         icon=folium.Icon(color="black", icon="star", prefix="fa")
     ).add_to(m)
-    # Círculo Rosa Vibrante em volta
-    folium.Circle([ponto_referencia.latitude, ponto_referencia.longitude], radius=1500, color="#E6007A", fill=True, fill_opacity=0.1).add_to(m)
+    folium.Circle([ponto_referencia.latitude, ponto_referencia.longitude], radius=1500, color="#6a11cb", fill=True, fill_opacity=0.1).add_to(m)
 
-# 2. IMÓVEIS (Pinos Coloridos)
 marker_cluster = MarkerCluster().add_to(m)
 
 if not df_total.empty:
@@ -230,43 +210,48 @@ if not df_total.empty:
             img = row.get('imagem') or "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&w=400&q=80"
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             
-            # Popup "Estilo Airbnb"
             html = f"""
             <div class="popup-card">
                 <img src="{img}" class="popup-img">
                 <div class="popup-body">
-                    <span class="popup-badge">Novo</span>
                     <div class="popup-price">{preco}</div>
-                    <div class="popup-title">{row.get('titulo','')[:40]}...</div>
+                    <div class="popup-title">{row.get('titulo','')[:45]}...</div>
                     <a href="{row.get('link')}" target="_blank" class="popup-btn">Ver Detalhes</a>
                 </div>
             </div>
             """
-            
             folium.Marker(
                 [row['lat'], row['lon']], 
-                popup=html,
-                # Ícones Roxos (Purple) combinam com a marca
+                popup=html, 
                 icon=folium.Icon(color="purple", icon="home", prefix="fa")
             ).add_to(marker_cluster)
 
-st_folium(m, width=None, height=650, returned_objects=[])
+st_folium(m, width=None, height=600, returned_objects=[])
 
-# --- 7. RODAPÉ (Capture Leads) ---
+# --- LEAD MAGNET (CUPOM) ---
 st.write("---")
-st.markdown("<h3 style='text-align: center; color: #333;'>🚀 Entre para o Clube Beta</h3>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666;'>Garanta acesso vitalício gratuito antes que vire pago.</p>", unsafe_allow_html=True)
 
-with st.form("lista_vip"):
-    c1, c2, c3 = st.columns([2, 2, 1])
-    with c1: e = st.text_input("E-mail", placeholder="seu@email.com")
-    with c2: c = st.text_input("Cidade", placeholder="Ex: Porto")
-    with c3: 
-        st.write("")
-        st.write("")
-        # Botão dentro do form herda o estilo vibrante
-        btn = st.form_submit_button("Quero Entrar")
-    
-    if btn and e and supabase:
-        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": c, "ativo": True, "plano": "beta_vip"}).execute()
-        st.balloons()
+c_lead_L, c_lead_R = st.columns([1, 1])
+
+with c_lead_L:
+    st.markdown("### 🎟️ Cupom de Fundador")
+    st.write("Quem usa o Beta ganha **50% de desconto vitalício** no futuro.")
+    st.info("Cadastre-se para garantir sua vaga.")
+
+with c_lead_R:
+    with st.form("lista_vip_glass"):
+        col_inp1, col_inp2 = st.columns(2)
+        with col_inp1: email = st.text_input("E-mail")
+        with col_inp2: nome = st.text_input("Nome")
+        
+        btn_cupom = st.form_submit_button("Garanta Meu Desconto")
+        
+        if btn_cupom and email and supabase:
+            supabase.table("alertas_clientes").insert({
+                "user_id": email, 
+                "termo_busca": "CUPOM_FUNDADOR", 
+                "ativo": True, 
+                "plano": "founder_coupon"
+            }).execute()
+            st.balloons()
+            st.success("Cadastrado com sucesso!")
