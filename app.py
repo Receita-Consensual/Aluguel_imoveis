@@ -4,8 +4,8 @@ import pandas as pd
 import folium
 from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
+import requests
+from streamlit_searchbox import st_searchbox # A BIBLIOTECA MÁGICA
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
@@ -54,7 +54,27 @@ def carregar_dados():
         return pd.DataFrame(response.data)
     except: return pd.DataFrame()
 
-# --- 3. SIDEBAR: BUGS ---
+# --- 3. FUNÇÃO DE AUTOCOMPLETE (GOOGLE STYLE) ---
+def buscar_sugestoes(termo):
+    if not termo: return []
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        "q": termo,
+        "format": "json",
+        "countrycodes": "pt", # Foca em Portugal
+        "limit": 5,
+        "addressdetails": 1
+    }
+    headers = {'User-Agent': 'receita_imob_beta'}
+    try:
+        r = requests.get(url, params=params, headers=headers)
+        data = r.json()
+        # Retorna lista de tuplas: (Nome que aparece, Valor que o código usa)
+        return [(item['display_name'], item) for item in data]
+    except:
+        return []
+
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=50)
     st.title("Central Beta 🚧")
@@ -65,52 +85,52 @@ with st.sidebar:
             supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": desc_bug, "ativo": False, "plano": nome_bug}).execute()
             st.success("Enviado!")
 
-# --- 4. HEADER ---
+# --- 5. HEADER ---
 c1, c2 = st.columns([1, 10])
 with c2:
     st.title("Receita Imob | Versão Beta")
     st.markdown("""
     <div class="feedback-box">
-        🎯 <b>Nova Função:</b> Pesquise por lojas ou pontos exatos (ex: "Lefties Aveiro", "Hospital São João") para ver casas perto deles.
+        🚀 <b>Novo Recurso:</b> Pesquisa Inteligente! Digite o nome da loja ou local e selecione na lista.
     </div>
     """, unsafe_allow_html=True)
 
 df_total = carregar_dados()
 
-# --- 5. BUSCA INTELIGENTE ---
+# --- 6. BUSCA COM AUTOCOMPLETE ---
 with st.container(border=True):
-    c_search, c_type, c_btn = st.columns([3, 2, 1])
+    c_search, c_type = st.columns([3, 1])
+    
     with c_search:
-        # Agora o placeholder sugere buscar LOJAS
-        local_input = st.text_input("Onde você precisa ir todo dia?", placeholder="Ex: Lefties Aveiro, Universidade do Porto...")
-    with c_type:
-        tipos = st.multiselect("Tipo", ["T1", "T2", "T3", "Quarto", "Casa"], default=["T1", "T2"])
-    with c_btn:
-        st.write(""); st.write("")
-        filtrar = st.button("🔍 Buscar Local", use_container_width=True)
+        # AQUI ESTÁ A MÁGICA: st_searchbox
+        local_selecionado = st_searchbox(
+            buscar_sugestoes,
+            key="busca_gps",
+            placeholder="Digite o local (Ex: Glicínias, Hospital de São João...)",
+            clear_on_submit=False
+        )
 
-# --- 6. LÓGICA DO MAPA (GPS PRECISO) ---
+    with c_type:
+        st.write("") # Espaço visual
+        tipos = st.multiselect("Filtro", ["T1", "T2", "T3", "Quarto"], default=["T1", "T2"])
+
+# --- 7. LÓGICA DO MAPA ---
 map_center = [39.55, -7.85] 
 zoom_start = 7
-ponto_referencia = None # Vai guardar o local da loja (Lefties)
+ponto_referencia = None 
 
-# Se o usuário buscou algo
-if local_input:
-    geolocator = Nominatim(user_agent="ri_beta_finder")
-    try:
-        # Tenta achar o local exato (Ex: Lefties)
-        loc = geolocator.geocode(f"{local_input}, Portugal", timeout=10)
-        
-        if loc:
-            map_center = [loc.latitude, loc.longitude]
-            zoom_start = 14 # Zoom bem perto
-            ponto_referencia = loc # Guardamos para desenhar o pino preto
-            st.toast(f"📍 Localizado: {loc.address}")
-        else:
-            st.warning("Não encontrei esse local exato. Mostrando visão geral.")
-            
-    except Exception as e:
-        st.error("Erro no GPS. Tente novamente.")
+# Se o usuário SELECIONOU algo na lista (não precisa clicar em botão buscar)
+if local_selecionado:
+    # local_selecionado já vem com latitude e longitude da API!
+    lat_busca = float(local_selecionado['lat'])
+    lon_busca = float(local_selecionado['lon'])
+    nome_busca = local_selecionado['display_name'].split(",")[0] # Pega só o primeiro nome
+    
+    map_center = [lat_busca, lon_busca]
+    zoom_start = 15 # Zoom bem perto
+    ponto_referencia = (lat_busca, lon_busca, nome_busca)
+    
+    st.toast(f"📍 Indo para: {nome_busca}")
 
 st.divider()
 
@@ -118,33 +138,26 @@ m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="OpenStreetMap"
 LocateControl(auto_start=True).add_to(m)
 Fullscreen().add_to(m)
 
-# 1. DESENHA O PINO DA BUSCA (A LOJA)
+# 1. PINO DO LOCAL PESQUISADO
 if ponto_referencia:
     folium.Marker(
-        [ponto_referencia.latitude, ponto_referencia.longitude],
-        popup=f"<b>📍 SEU DESTINO</b><br>{ponto_referencia.address}",
+        [ponto_referencia[0], ponto_referencia[1]],
+        popup=f"<b>🎯 {ponto_referencia[2]}</b>",
         icon=folium.Icon(color="black", icon="star", prefix="fa")
     ).add_to(m)
     
-    # Desenha um círculo de 2km em volta da loja
     folium.Circle(
-        location=[ponto_referencia.latitude, ponto_referencia.longitude],
-        radius=2000, # 2km
-        color="black",
-        fill=True,
-        fill_opacity=0.05
+        location=[ponto_referencia[0], ponto_referencia[1]],
+        radius=1500, # 1.5km
+        color="black", fill=True, fill_opacity=0.05
     ).add_to(m)
 
-# 2. DESENHA OS IMÓVEIS (AS CASAS)
+# 2. IMÓVEIS
 marker_cluster = MarkerCluster().add_to(m)
 
 if not df_total.empty:
     for _, row in df_total.iterrows():
         if pd.notnull(row['lat']) and row['lat'] != 0:
-            
-            # Se tiver filtro de local e achamos um ponto, podemos filtrar visualmente?
-            # Por enquanto mostramos todos para encher o mapa, mas o foco está na loja
-            
             img = row.get('imagem') or "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&w=400&q=80"
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             
@@ -166,14 +179,13 @@ if not df_total.empty:
 
 st_folium(m, width=None, height=600, returned_objects=[])
 
-# --- 7. RODAPÉ DE LEADS ---
+# --- 8. LEAD MAGNET ---
 st.write("---")
 st.header("🚀 Lista de Fundadores")
-st.write("Garanta acesso vitalício ao preço de lançamento.")
 with st.form("lista_espera"):
     c1, c2 = st.columns(2)
     with c1: e = st.text_input("E-mail")
     with c2: cid = st.text_input("Cidade")
     if st.form_submit_button("✅ Entrar na Lista") and e and supabase:
-        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": cid, "ativo": True, "plano": "beta"}).execute()
+        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": cid, "ativo": True, "plano": "beta_v2"}).execute()
         st.balloons()
