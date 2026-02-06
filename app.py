@@ -16,6 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Chaves
 SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
 SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
 
@@ -44,11 +45,14 @@ st.markdown("""
     .btn-maps {display: block; margin-top: 10px; text-align: center; background: #1a73e8; color: white !important; padding: 8px; border-radius: 4px; text-decoration: none; font-weight: 500; font-size: 13px;}
     .btn-maps:hover {background: #1558b0;}
     
-    /* Estilo do Input de Busca */
-    div[data-testid="stTextInput"] input {
-        border-radius: 20px;
-        border: 1px solid #dfe1e5;
-        padding-left: 15px;
+    /* Estilo PRO */
+    .pro-lock {
+        background-color: #f8f9fa;
+        border: 1px dashed #ccc;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        color: #666;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -56,18 +60,15 @@ st.markdown("""
 # --- 2. CONEXÃO ---
 @st.cache_resource
 def init_connection():
-    try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
-    except:
-        return None
-
+    try: return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except: return None
 supabase = init_connection()
 
 # --- 3. SESSÃO ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_plan' not in st.session_state: st.session_state['user_plan'] = 'free'
 
-# --- 4. FUNÇÃO DE DADOS (CACHEADA) ---
+# --- 4. FUNÇÃO DE DADOS ---
 @st.cache_data(ttl=60)
 def carregar_dados_base():
     if not supabase: return pd.DataFrame()
@@ -76,14 +77,13 @@ def carregar_dados_base():
         df_raw = pd.DataFrame(response.data)
         if df_raw.empty: return pd.DataFrame()
 
-        # Filtro de Link Bom
         def link_eh_bom(url):
             url = str(url).lower()
             return "/imovel/" in url or "/anuncio/" in url or ".htm" in url
         
         df_raw = df_raw[df_raw['link'].apply(link_eh_bom)]
         
-        # Correção Lat/Lon com Ruído
+        # Correção Lat/Lon
         def corrigir_lat(row):
             if row['lat'] != 0: return row['lat']
             end = str(row['endereco']).lower()
@@ -101,27 +101,24 @@ def carregar_dados_base():
         df_raw['lat'] = df_raw.apply(corrigir_lat, axis=1)
         df_raw['lon'] = df_raw.apply(corrigir_lon, axis=1)
         return df_raw
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
-# --- 5. LÓGICA DE BUSCA GEOGRÁFICA ---
 def geolocalizar(endereco):
     try:
-        geolocator = Nominatim(user_agent="receita_imob_app_v2")
-        # Força busca em Portugal
+        geolocator = Nominatim(user_agent="receita_imob_pro")
         loc = geolocator.geocode(f"{endereco}, Portugal")
         if loc: return (loc.latitude, loc.longitude), loc.address
         return None, None
-    except:
-        return None, None
+    except: return None, None
 
-# --- 6. INTERFACE ---
+# --- 5. INTERFACE & LOGICA FREE vs PRO ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
     st.markdown("### Receita Imob")
     
+    # Login
     if not st.session_state['logged_in']:
-        with st.expander("🔐 Entrar"):
+        with st.expander("🔐 Entrar (Membros)"):
             email = st.text_input("Email")
             senha = st.text_input("Senha", type="password")
             if st.button("Entrar"):
@@ -131,71 +128,100 @@ with st.sidebar:
                         st.session_state['logged_in'] = True
                         st.session_state['user_plan'] = res.data[0]['plano']
                         st.rerun()
-                    else:
-                        st.error("Erro")
+                    else: st.error("Erro")
     else:
         st.success("Logado como PRO")
         if st.button("Sair"):
             st.session_state['logged_in'] = False
+            st.session_state['user_plan'] = 'free'
             st.rerun()
+    
     st.divider()
+    
+    # LISTA DE VANTAGENS (MARKETING)
+    if st.session_state['user_plan'] == 'free':
+        st.info("🔒 **Vantagens do PRO:**")
+        st.markdown("""
+        - 🎯 **Busca por Local de Trabalho** (ex: Altice, Bosch)
+        - 📏 **Filtro de Raio** (ex: 2km a pé)
+        - ⚡ **Alertas em Tempo Real**
+        """)
+        st.markdown("---")
+        opcoes_cidades = ["Todas"] + [k.capitalize() for k in sorted(COORDS_FIXAS.keys())]
+        filtro_cidade = st.selectbox("📍 Filtrar por Cidade (Grátis)", opcoes_cidades)
+    else:
+        st.success("💎 **Benefícios PRO Ativos**")
+        st.markdown("- Busca por Raio: **Liberada**")
+        st.markdown("- Alertas: **Ativos**")
 
 # CARREGA BASE
 df_base = carregar_dados_base()
 
-# --- ÁREA DE BUSCA INTELIGENTE ---
-col_search, col_radius, col_price = st.columns([3, 1, 1])
-
-with col_search:
-    termo_busca = st.text_input("🔍 Perto de onde?", placeholder="Ex: Hospital de Aveiro, Bosch Ovar, Forum Coimbra...")
-
-with col_radius:
-    raio_km = st.slider("Raio (km)", 1, 20, 3)
-
-with col_price:
-    filtro_preco = st.slider("Max €", 0, 5000, 2000)
-
-# PROCESSAMENTO DE FILTROS
-df_final = pd.DataFrame()
+# --- ÁREA DE BUSCA (AQUI É A MÁGICA) ---
 ponto_central = None
-endereco_encontrado = None
+termo_busca = None
+raio_km = 5
+filtro_preco = 2500
+
+if st.session_state['user_plan'] == 'pro':
+    # --- INTERFACE PRO (COMPLETA) ---
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([3, 1, 1])
+        with c1:
+            termo_busca = st.text_input("🏢 Onde você vai trabalhar/estudar?", placeholder="Ex: Altice Labs, Universidade de Aveiro...")
+        with c2:
+            raio_km = st.slider("Raio (km)", 1, 15, 3)
+        with c3:
+            filtro_preco = st.slider("Max €", 0, 5000, 2000)
+else:
+    # --- INTERFACE FREE (BLOQUEADA) ---
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.text_input("🏢 Onde você trabalha?", placeholder="🔒 Exclusivo PRO (Ex: Altice, Hospital...)", disabled=True)
+            st.caption("🔒 Usuários Free buscam apenas por Cidade na barra lateral.")
+        with c2:
+            filtro_preco = st.slider("Max €", 0, 5000, 2000)
+
+# PROCESSAMENTO
+df_final = pd.DataFrame()
 
 if not df_base.empty:
     df_temp = df_base[df_base['preco'] <= filtro_preco]
     
-    # Se usuário digitou um local
-    if termo_busca:
+    # LÓGICA PRO (RAIO)
+    if st.session_state['user_plan'] == 'pro' and termo_busca:
         coords_busca, endereco_encontrado = geolocalizar(termo_busca)
-        
         if coords_busca:
             ponto_central = coords_busca
-            st.success(f"📍 Localizado: **{endereco_encontrado}**")
+            st.success(f"📍 Centralizado em: **{endereco_encontrado}**")
             
-            # FILTRO MATEMÁTICO DE DISTÂNCIA
             def calcular_distancia(row):
-                # Se o imóvel está em "lat 39.5" (fallback), ignora
                 if row['lat'] == 39.5: return 9999
                 return geodesic(coords_busca, (row['lat'], row['lon'])).km
             
             df_temp['distancia'] = df_temp.apply(calcular_distancia, axis=1)
             df_final = df_temp[df_temp['distancia'] <= raio_km]
             
-            if df_final.empty:
-                st.warning(f"Nenhum imóvel encontrado num raio de {raio_km}km daqui.")
+            if df_final.empty: st.warning(f"Nada encontrado a {raio_km}km daqui.")
         else:
-            st.error("Local não encontrado. Tente ser mais específico (ex: 'Rua X, Aveiro').")
-            df_final = df_temp # Mostra tudo se falhar a busca
+            st.error("Local não encontrado.")
+            df_final = df_temp
+            
+    # LÓGICA FREE (CIDADE)
     else:
-        # Se não buscou nada específico, mostra tudo
-        df_final = df_temp
+        if st.session_state['user_plan'] == 'free' and 'filtro_cidade' in locals() and filtro_cidade != "Todas":
+             df_final = df_temp[df_temp['endereco'].str.contains(filtro_cidade, case=False, na=False)]
+        else:
+             df_final = df_temp
 
-# --- 7. MAPA ---
+# --- 6. MAPA ---
 if ponto_central:
     center = ponto_central
     zoom = 14
 elif not df_final.empty:
     center = [df_final['lat'].mean(), df_final['lon'].mean()]
-    zoom = 8
+    zoom = 10 if st.session_state['user_plan'] == 'free' and filtro_cidade != "Todas" else 7
 else:
     center = [39.6, -8.0]
     zoom = 7
@@ -204,37 +230,24 @@ m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", control_
 LocateControl().add_to(m)
 Fullscreen().add_to(m)
 
-# SE TIVER BUSCA, DESENHA O PONTO CENTRAL (TRABALHO/LOCAL)
+# DESENHA RAIO (SÓ PRO)
 if ponto_central:
-    folium.Marker(
-        ponto_central,
-        popup=f"📍 {termo_busca}",
-        icon=folium.Icon(color="black", icon="briefcase", prefix="fa"),
-        tooltip="Seu Ponto de Interesse"
-    ).add_to(m)
-    
-    # Desenha o círculo do raio
-    folium.Circle(
-        location=ponto_central,
-        radius=raio_km * 1000,
-        color="#3388ff",
-        fill=True,
-        fill_opacity=0.1
-    ).add_to(m)
+    folium.Marker(ponto_central, popup=f"📍 {termo_busca}", icon=folium.Icon(color="black", icon="briefcase", prefix="fa")).add_to(m)
+    folium.Circle(location=ponto_central, radius=raio_km * 1000, color="#3388ff", fill=True, fill_opacity=0.1).add_to(m)
 
-# DESENHA OS IMÓVEIS
+# PINS
 marker_cluster = MarkerCluster().add_to(m)
-
 if not df_final.empty:
     for _, row in df_final.iterrows():
-        if row['lat'] != 39.5: # Ignora os sem local
+        if row['lat'] != 39.5: 
             img = row.get('imagem')
-            if not img or str(img) == 'nan': 
-                img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
-            
+            if not img or str(img) == 'nan': img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             titulo_curto = str(row.get('titulo', 'Imóvel'))[:50]
-            dist_txt = f"📏 {row['distancia']:.1f} km" if 'distancia' in row else ""
+            
+            # Mostra distância no card se for PRO
+            dist_tag = ""
+            if 'distancia' in row: dist_tag = f"<span style='font-size:11px; color:green;'>🚶 {row['distancia']:.1f}km</span>"
             
             html = f"""
             <div class="map-card">
@@ -244,18 +257,13 @@ if not df_final.empty:
                 <div class="map-info">
                     <div style="display:flex; justify-content:space-between;">
                         <span style="color: #1a73e8; font-weight: bold; font-size: 16px;">{preco}</span>
-                        <span style="font-size: 12px; color: #666;">{dist_txt}</span>
+                        {dist_tag}
                     </div>
                     <div style="font-size: 13px; color: #333; margin: 5px 0; line-height: 1.2;">{titulo_curto}...</div>
                     <a href="{row.get('link')}" target="_blank" class="btn-maps">Ver Anúncio</a>
                 </div>
             </div>
             """
-            
-            folium.Marker(
-                [row['lat'], row['lon']],
-                popup=folium.Popup(html, max_width=240),
-                icon=folium.Icon(color="blue", icon="home", prefix="fa")
-            ).add_to(marker_cluster)
+            folium.Marker([row['lat'], row['lon']], popup=folium.Popup(html, max_width=240), icon=folium.Icon(color="blue", icon="home", prefix="fa")).add_to(marker_cluster)
 
 st_folium(m, width=None, height=700, returned_objects=[])
