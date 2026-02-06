@@ -11,15 +11,40 @@ import numpy as np
 st.set_page_config(page_title="Lugar", page_icon="📍", layout="wide", initial_sidebar_state="collapsed")
 
 # CSS Customizado para um visual de Startup Profissional
+# CSS para garantir legibilidade no telefone e esconder lixo visual
 st.markdown("""
     <style>
+    /* 1. Esconde elementos desnecessários */
     [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, footer, #MainMenu {display: none !important;}
     .block-container {padding: 1rem !important;}
-    .stApp { background: #f5f7fa; }
+    
+    /* 2. Fundo da App */
+    .stApp { background-color: #f5f7fa !important; }
+
+    /* 3. Força as letras a serem escuras (Resolve o problema do telefone) */
+    p, span, label, .stMarkdown, [data-testid="stCaptionContainer"] {
+        color: #1a1a1a !important;
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* 4. Estilo do Título com gradiente e fallback para mobile */
     .brand-text {
         background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        font-size: 3rem; font-weight: 800; text-align: center; display: block;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: #6a11cb; /* Cor de fallback caso o gradiente falhe no mobile */
+        font-size: 2.5rem; /* Reduzi um pouco para não quebrar no telefone */
+        font-weight: 800;
+        text-align: center;
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+
+    /* 5. Ajuste para o campo de input no mobile */
+    .stTextInput input {
+        color: #1a1a1a !important;
+        background-color: white !important;
+        border: 1px solid #ddd !important;
     }
     </style>
     """, unsafe_allow_html=True)
