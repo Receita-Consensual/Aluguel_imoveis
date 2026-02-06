@@ -6,15 +6,15 @@ from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
 import random
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
     page_title="Receita Imob",
-    page_icon="🏢",
+    page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed" # Barra fechada para dar foco no mapa
+    initial_sidebar_state="expanded"
 )
 
-# Coordenadas Fixas de Resgate
+# Coordenadas de Segurança (Para onde o mapa vai se não tiver GPS)
 COORDS_FIXAS = {
     "aveiro": [40.6405, -8.6538],
     "porto": [41.1579, -8.6291],
@@ -26,16 +26,17 @@ COORDS_FIXAS = {
     "setúbal": [38.5244, -8.8882],
     "viseu": [40.6566, -7.9124],
     "viana": [41.6918, -8.8344],
-    "figueira": [40.1517, -8.8569]
+    "figueira": [40.1517, -8.8569],
+    "matosinhos": [41.1844, -8.6963],
+    "gaia": [41.1333, -8.6167]
 }
 
-# CSS Google Maps Style
+# CSS Estilo Google
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
     html, body, [class*="css"] {font-family: 'Roboto', sans-serif;}
     #MainMenu, footer, header {visibility: hidden;}
-    .stApp {background-color: white;}
     
     /* Card do Mapa */
     .map-card {
@@ -50,7 +51,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO E DADOS (COM CACHE ANTI-PISCA) ---
+# --- 2. CONEXÃO ---
 @st.cache_resource
 def init_connection():
     try:
@@ -60,119 +61,133 @@ def init_connection():
 
 supabase = init_connection()
 
-# AQUI ESTÁ A CORREÇÃO: Cache Data (TTL 60s)
-# Isso impede que o Python recalcule o Random a cada segundo
-@st.cache_data(ttl=60)
-def carregar_dados_blindados():
-    if not supabase: return pd.DataFrame()
-    
-    try:
-        # Pega dados
-        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(1000).execute()
-        df = pd.DataFrame(response.data)
-        
-        if df.empty: return df
+# --- 3. SESSÃO ---
+if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
+if 'user_plan' not in st.session_state: st.session_state['user_plan'] = 'free'
 
-        # --- CORREÇÃO DE COORDENADAS ---
-        # Fazemos isso DENTRO do cache, então o "random" fica fixo por 60 segundos
-        def corrigir_lat(row):
-            if row['lat'] != 0: return row['lat']
-            end = str(row['endereco']).lower()
-            for cidade, coords in COORDS_FIXAS.items():
-                if cidade in end:
-                    return coords[0] + random.uniform(-0.03, 0.03) 
-            return 39.5 # Fallback
-
-        def corrigir_lon(row):
-            if row['lon'] != 0: return row['lon']
-            end = str(row['endereco']).lower()
-            for cidade, coords in COORDS_FIXAS.items():
-                if cidade in end:
-                    return coords[1] + random.uniform(-0.03, 0.03)
-            return -8.0
-
-        df['lat'] = df.apply(corrigir_lat, axis=1)
-        df['lon'] = df.apply(corrigir_lon, axis=1)
-        
-        return df
-        
-    except Exception as e:
-        return pd.DataFrame()
-
-# Carrega os dados (Agora eles são estáveis!)
-df_estavel = carregar_dados_blindados()
-
-# --- 3. BARRA LATERAL SIMPLIFICADA ---
+# --- 4. BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
     st.markdown("### Receita Imob")
     
-    cidades_unicas = ["Todas"]
-    if not df_estavel.empty:
-        # Tenta extrair cidades reais dos dados
-        zonas_detectadas = [c for c in COORDS_FIXAS.keys() if df_estavel['endereco'].str.contains(c, case=False).any()]
-        cidades_unicas += [z.capitalize() for z in zonas_detectadas]
-        
-    filtro_cidade = st.selectbox("📍 Filtrar Cidade", cidades_unicas)
-    
+    # Login
+    if not st.session_state['logged_in']:
+        with st.expander("🔐 Entrar"):
+            email = st.text_input("Email")
+            senha = st.text_input("Senha", type="password")
+            if st.button("Entrar"):
+                if supabase:
+                    res = supabase.table("usuarios").select("*").eq("email", email).eq("senha", senha).execute()
+                    if res.data:
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_plan'] = res.data[0]['plano']
+                        st.rerun()
+                    else:
+                        st.error("Erro no login")
+    else:
+        st.success("Logado como PRO")
+        if st.button("Sair"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+
     st.divider()
-    st.info("💎 Membro PRO: Ativo")
-
-# --- 4. MAPA ESTÁVEL ---
-
-# Filtragem
-df_mapa = df_estavel.copy()
-center = [39.6, -8.0]
-zoom = 7
-
-if not df_mapa.empty:
-    if filtro_cidade != "Todas":
-        df_mapa = df_mapa[df_mapa['endereco'].str.contains(filtro_cidade, case=False, na=False)]
-        if not df_mapa.empty:
-            center = [df_mapa['lat'].mean(), df_mapa['lon'].mean()]
-            zoom = 12
-
-    # Renderiza o mapa
-    m = folium.Map(
-        location=center, 
-        zoom_start=zoom,
-        tiles="OpenStreetMap",
-        control_scale=True
-    )
     
-    Fullscreen().add_to(m)
-    
-    marker_cluster = MarkerCluster().add_to(m)
+    # Filtros
+    filtro_cidade = st.selectbox("📍 Filtrar Cidade", ["Todas"] + [k.capitalize() for k in sorted(COORDS_FIXAS.keys())])
+    filtro_preco = st.slider("💰 Preço Máximo", 0, 5000, 2000)
 
-    for _, row in df_mapa.iterrows():
-        # Tratamento de Imagem
-        img = row.get('imagem')
-        if not img or str(img) == 'nan' or str(img) == 'None':
-            img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
+    # Contador para Debug (Para você ver se está carregando)
+    st.caption("Status do Sistema:")
+
+# --- 5. CARREGAMENTO E CORREÇÃO DE DADOS ---
+df = pd.DataFrame()
+
+if supabase:
+    try:
+        # Pega TUDO (aumentei o limite para 2000)
+        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(2000).execute()
+        df_raw = pd.DataFrame(response.data)
         
-        preco = f"€ {row['preco']:,.0f}" if row['preco'] > 0 else "Sob Consulta"
-        
-        html = f"""
-        <div class="map-card">
-            <img src="{img}" class="map-img">
-            <div class="map-info">
-                <div class="map-price">{preco}</div>
-                <div class="map-title">{row.get('titulo', 'Imóvel')}</div>
-                <div style="font-size:11px; color:#666;">📍 {row.get('endereco', '')}</div>
-                <a href="{row.get('link')}" target="_blank" class="btn-maps">Ver Anúncio</a>
+        if not df_raw.empty:
+            # Filtro de Preço
+            df = df_raw[df_raw['preco'] <= filtro_preco]
+            
+            # Filtro de Cidade (Texto)
+            if filtro_cidade != "Todas":
+                df = df[df['endereco'].str.contains(filtro_cidade, case=False, na=False)]
+            
+            st.sidebar.success(f"Carregados: {len(df)} imóveis")
+            
+            # CORREÇÃO DE COORDENADAS (Sem Cache para garantir funcionamento)
+            def corrigir_lat(row):
+                if row['lat'] != 0: return row['lat']
+                end = str(row['endereco']).lower()
+                for cidade, coords in COORDS_FIXAS.items():
+                    if cidade in end: return coords[0] + random.uniform(-0.01, 0.01)
+                return 39.5
+
+            def corrigir_lon(row):
+                if row['lon'] != 0: return row['lon']
+                end = str(row['endereco']).lower()
+                for cidade, coords in COORDS_FIXAS.items():
+                    if cidade in end: return coords[1] + random.uniform(-0.01, 0.01)
+                return -8.0
+
+            df['lat'] = df.apply(corrigir_lat, axis=1)
+            df['lon'] = df.apply(corrigir_lon, axis=1)
+
+    except Exception as e:
+        st.error(f"Erro ao carregar: {e}")
+
+# --- 6. MAPA (OpenStreetMap) ---
+
+# Define onde o mapa começa
+if not df.empty and filtro_cidade != "Todas":
+    # Foca na cidade filtrada
+    center = [df['lat'].mean(), df['lon'].mean()]
+    zoom = 13
+elif not df.empty:
+    # Foca nos dados gerais
+    center = [df['lat'].mean(), df['lon'].mean()]
+    zoom = 7
+else:
+    # Foca em Portugal
+    center = [39.6, -8.0]
+    zoom = 7
+
+m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap", control_scale=True)
+LocateControl().add_to(m)
+Fullscreen().add_to(m)
+
+marker_cluster = MarkerCluster().add_to(m)
+
+if not df.empty:
+    for _, row in df.iterrows():
+        # Só mostra se tiver coord válida
+        if row['lat'] != 39.5: 
+            img = row.get('imagem')
+            if not img or str(img) == 'nan': img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
+            
+            preco = f"€ {row['preco']:,.0f}" if row['preco'] > 0 else "Sob Consulta"
+            
+            html = f"""
+            <div class="map-card">
+                <a href="{row.get('link')}" target="_blank">
+                    <img src="{img}" class="map-img">
+                </a>
+                <div class="map-info">
+                    <div class="map-price">{preco}</div>
+                    <div class="map-title">{row.get('titulo', 'Imóvel')}</div>
+                    <div style="font-size:11px; color:#666;">📍 {row.get('endereco', '')}</div>
+                    <a href="{row.get('link')}" target="_blank" class="btn-maps">Ver Anúncio</a>
+                </div>
             </div>
-        </div>
-        """
-        
-        folium.Marker(
-            [row['lat'], row['lon']],
-            popup=folium.Popup(html, max_width=260),
-            icon=folium.Icon(color="blue", icon="home", prefix="fa")
-        ).add_to(marker_cluster)
+            """
+            
+            folium.Marker(
+                [row['lat'], row['lon']],
+                popup=folium.Popup(html, max_width=260),
+                icon=folium.Icon(color="blue", icon="home", prefix="fa")
+            ).add_to(marker_cluster)
 
-    # Renderiza sem piscar (use_container_width=True ajuda na estabilidade)
-    st_folium(m, width=None, height=700, returned_objects=[])
-
-# Rodapé discreto
-if not df_mapa.empty:
-    st.caption(f"{len(df_mapa)} imóveis carregados.")
+st_folium(m, width=None, height=700)
