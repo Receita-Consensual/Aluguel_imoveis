@@ -1,5 +1,7 @@
+
 streamlit
 supabase
 pandas
 folium
 streamlit-folium
+geopy
