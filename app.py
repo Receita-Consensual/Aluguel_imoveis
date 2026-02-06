@@ -5,7 +5,6 @@ import folium
 from folium.plugins import MarkerCluster, Fullscreen
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
-import time
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
@@ -15,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS PROFISSIONAL
+# CSS MAIS VIBRANTE E COLORIDO
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -23,14 +22,20 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* Cores mais vivas no Header */
+    h1 { color: #2e86de; } 
+    
     .badge-pro {
-        background-color: #ffd700; color: black; padding: 4px 8px;
+        background-color: #2e86de; color: white; padding: 4px 8px;
         border-radius: 4px; font-weight: bold; font-size: 12px;
     }
     .stButton>button {
-        background-color: #000; color: white; border-radius: 8px; font-weight: 600; border: none;
+        background-color: #ff4757; color: white; border-radius: 8px; font-weight: 600; border: none;
     }
-    .popup-card { width: 200px; font-family: sans-serif; }
+    .stButton>button:hover {
+        background-color: #ff6b81;
+    }
+    .popup-card { width: 220px; font-family: sans-serif; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -97,13 +102,16 @@ with st.container(border=True):
         st.write(""); st.write("")
         buscar = st.button("🔍 Buscar")
 
-# --- 6. MAPA E DADOS ---
+# --- 6. MAPA E DADOS (OTIMIZADO) ---
 df = pd.DataFrame()
-map_center = [39.5, -8.0]; zoom = 7
+# Centraliza em Portugal por padrão (mais bonito que no mar)
+map_center = [39.5, -8.0]
+zoom = 7
 
 if supabase:
     try:
-        query = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(800)
+        # Limitamos a 600 para garantir velocidade máxima no carregamento inicial
+        query = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(600)
         df = pd.DataFrame(query.execute().data)
         
         if local and not df.empty:
@@ -121,7 +129,8 @@ if supabase:
 st.divider()
 
 if not df.empty:
-    m = folium.Map(location=map_center, zoom_start=zoom, tiles="CartoDB positron")
+    # MUDANÇA 1: Tiles="OpenStreetMap" (Colorido e Padrão)
+    m = folium.Map(location=map_center, zoom_start=zoom, tiles="OpenStreetMap")
     Fullscreen().add_to(m)
     marker_cluster = MarkerCluster().add_to(m)
 
@@ -133,17 +142,25 @@ if not df.empty:
             html = f"""
             <div class="popup-card">
                 <img src="{img}" style="width:100%; height:120px; object-fit:cover; border-radius:8px 8px 0 0;">
-                <div style="padding:8px;">
-                    <b>{preco}</b><br>
-                    <span style="font-size:12px">{row.get('titulo','')[:40]}...</span><br>
-                    <a href="{row.get('link')}" target="_blank" style="display:block; background:#ff4b4b; color:white; text-align:center; padding:5px; margin-top:5px; text-decoration:none; border-radius:4px;">Ver Anúncio</a>
+                <div style="padding:10px;">
+                    <b style="color: #27ae60; font-size: 14px;">{preco}</b><br>
+                    <span style="font-size:12px; font-weight:bold; color: #333;">{row.get('titulo','')[:40]}...</span><br>
+                    <a href="{row.get('link')}" target="_blank" style="display:block; background:#3742fa; color:white; text-align:center; padding:6px; margin-top:8px; text-decoration:none; border-radius:4px; font-weight:bold;">Ver Anúncio</a>
                 </div>
             </div>
             """
-            folium.Marker([row['lat'], row['lon']], popup=html, icon=folium.Icon(color="black", icon="home", prefix="fa")).add_to(marker_cluster)
+            # MUDANÇA 2: Ícones Coloridos (Azul)
+            folium.Marker(
+                [row['lat'], row['lon']], 
+                popup=html, 
+                icon=folium.Icon(color="blue", icon="home", prefix="fa")
+            ).add_to(marker_cluster)
 
-    st_folium(m, width=None, height=600)
-    st.caption(f"{len(df)} imóveis encontrados.")
+    # MUDANÇA 3: OTIMIZAÇÃO DE VELOCIDADE (returned_objects=[])
+    # Isso faz o mapa parar de recarregar a cada clique, fica instantâneo.
+    st_folium(m, width=None, height=600, returned_objects=[])
+    
+    st.caption(f"{len(df)} oportunidades encontradas.")
 else:
     st.info("Nenhum imóvel encontrado aqui. Tente outra cidade.")
 
@@ -156,11 +173,11 @@ with st.expander("💎 Desbloquear PRO - €9,90 (Pagamento Único)"):
     c1, c2 = st.columns(2)
     with c1:
         st.info("📱 **MB WAY**")
-        st.markdown("352 924 914 745") # <--- SEU NÚMERO AQUI
+        st.markdown(f"**352 924 914 745**") 
         st.caption("Envie o comprovativo abaixo.")
     with c2:
         st.info("🏦 **IBAN**")
-        st.markdown("### PT50004587194041072246051") # <--- SEU IBAN AQUI
+        st.markdown("**PT50 0004 5871 9404 1072 2460 51**") # Formatado para leitura fácil
         st.caption("Ana Claudia Campos Dias")
     
     with st.form("pagamento"):
