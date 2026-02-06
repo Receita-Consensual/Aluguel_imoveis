@@ -14,37 +14,48 @@ st.set_page_config(page_title="Lugar", page_icon="📍", layout="wide", initial_
 # CSS para garantir legibilidade no telefone e esconder lixo visual
 st.markdown("""
     <style>
-    /* 1. Esconde elementos desnecessários */
+    /* 1. Reset Total e Fundo */
     [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, footer, #MainMenu {display: none !important;}
     .block-container {padding: 1rem !important;}
-    
-    /* 2. Fundo da App */
-    .stApp { background-color: #f5f7fa !important; }
+    .stApp { background-color: #ffffff !important; }
 
-    /* 3. Força as letras a serem escuras (Resolve o problema do telefone) */
-    p, span, label, .stMarkdown, [data-testid="stCaptionContainer"] {
+    /* 2. Topo: Força a cor do contador (Caption) */
+    [data-testid="stCaptionContainer"] {
         color: #1a1a1a !important;
-        font-family: 'Inter', sans-serif;
+        font-weight: 600 !important;
+        text-align: center;
+        display: block;
     }
 
-    /* 4. Estilo do Título com gradiente e fallback para mobile */
+    /* 3. Título Principal */
     .brand-text {
         background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        color: #6a11cb; /* Cor de fallback caso o gradiente falhe no mobile */
-        font-size: 2.5rem; /* Reduzi um pouco para não quebrar no telefone */
+        color: #6a11cb; 
+        font-size: 2.8rem;
         font-weight: 800;
         text-align: center;
         display: block;
-        margin-bottom: 0.5rem;
     }
 
-    /* 5. Ajuste para o campo de input no mobile */
+    /* 4. Em Baixo: Estilização do Formulário de Cupom */
+    .stForm {
+        background-color: #f8f9fa !important;
+        border: 1px solid #e0e0e0 !important;
+        padding: 20px !important;
+        border-radius: 15px !important;
+    }
+
+    /* Força cor de todos os textos, títulos e labels */
+    h1, h2, h3, p, span, label {
+        color: #1a1a1a !important;
+    }
+
+    /* Garante que o texto dentro do input de e-mail seja visível */
     .stTextInput input {
         color: #1a1a1a !important;
-        background-color: white !important;
-        border: 1px solid #ddd !important;
+        background-color: #ffffff !important;
     }
     </style>
     """, unsafe_allow_html=True)
