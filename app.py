@@ -32,7 +32,7 @@ COORDS_FIXAS = {
 
 # COORDENADAS MANUAIS VIP (Para não depender do Google errar)
 LOCAIS_MANUAIS = {
-    "🏢 Altice Labs (Aveiro)": (40.6326, -8.6552), # Coordenada Exata Corrigida
+    "🏢 Altice Labs (Aveiro)": (40.3744, -8.3847), # Coordenada Exata Corrigida
     "🎓 Universidade de Aveiro": (40.6306, -8.6579),
     "🏥 Hospital de São João (Porto)": (41.1812, -8.6010)
 }
