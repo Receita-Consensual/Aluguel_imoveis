@@ -4,37 +4,63 @@ import pandas as pd
 import folium
 from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
-import requests
-from streamlit_searchbox import st_searchbox # A BIBLIOTECA MÁGICA
+from geopy.geocoders import Nominatim
 
-# --- 1. CONFIGURAÇÃO VISUAL ---
+# --- 1. CONFIGURAÇÃO VISUAL (BRANDING: LUGAR) ---
 st.set_page_config(
-    page_title="Receita Imob (BETA)",
-    page_icon="🚧",
+    page_title="Lugar",
+    page_icon="📍",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
+# CSS "LIMPEZA TOTAL" (Esconde menus do Streamlit)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    
+    /* Fonte Geral */
     html, body, [class*="css"] {font-family: 'Inter', sans-serif;}
+    
+    /* ESCONDER MENUS PADRÃO DO STREAMLIT (As setas vermelhas que você mandou) */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;} /* Esconde o topo */
+    .stDeployButton {display:none;} /* Esconde botão Manage App */
     
-    .popup-card { width: 220px; font-family: sans-serif; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    .popup-img { width: 100%; height: 120px; object-fit: cover; }
-    .popup-body { padding: 10px; background: white; }
-    .popup-price { color: #27ae60; font-weight: 800; font-size: 15px; }
-    .popup-title { font-size: 13px; font-weight: 600; color: #333; margin: 5px 0; line-height: 1.2; }
+    /* CORES DA MARCA "LUGAR" (Roxo NuBank + Azul Tech) */
+    .brand-title {
+        color: #820AD1; /* Roxo estilo Nubank */
+        font-weight: 800;
+        font-size: 3rem;
+        margin-bottom: 0;
+        letter-spacing: -1px;
+    }
+    .brand-subtitle {
+        color: #555;
+        font-size: 1.1rem;
+        margin-top: -10px;
+        margin-bottom: 20px;
+    }
+
+    /* CARD DO IMÓVEL (Visual App) */
+    .popup-card { width: 220px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-family: 'Inter', sans-serif; }
+    .popup-img { width: 100%; height: 130px; object-fit: cover; }
+    .popup-body { padding: 12px; background: white; }
+    .popup-price { color: #820AD1; font-weight: 800; font-size: 18px; }
+    .popup-title { font-size: 13px; font-weight: 600; color: #333; margin: 5px 0; }
     .popup-btn { 
-        display: block; background: #2e86de; color: white; text-align: center; 
-        padding: 8px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 12px; margin-top: 8px;
+        display: block; background: #000; color: white; text-align: center; 
+        padding: 10px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 12px; margin-top: 10px;
     }
+    .popup-btn:hover { background: #333; }
     
-    .feedback-box {
-        background-color: #f1f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4757; margin-bottom: 20px;
+    /* BOTÃO DE BUSCA */
+    .stButton>button {
+        background-color: #820AD1; color: white; border-radius: 10px; height: 3em; font-weight: bold; border: none; width: 100%;
     }
+    .stButton>button:hover { background-color: #6D08AF; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -50,116 +76,87 @@ supabase = init_connection()
 def carregar_dados():
     if not supabase: return pd.DataFrame()
     try:
-        response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(800).execute()
+        # Limitamos a 600 e removemos Latitude 0
+        response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(600).execute()
         return pd.DataFrame(response.data)
     except: return pd.DataFrame()
 
-# --- 3. FUNÇÃO DE AUTOCOMPLETE (GOOGLE STYLE) ---
-def buscar_sugestoes(termo):
-    if not termo: return []
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        "q": termo,
-        "format": "json",
-        "countrycodes": "pt", # Foca em Portugal
-        "limit": 5,
-        "addressdetails": 1
-    }
-    headers = {'User-Agent': 'receita_imob_beta'}
-    try:
-        r = requests.get(url, params=params, headers=headers)
-        data = r.json()
-        # Retorna lista de tuplas: (Nome que aparece, Valor que o código usa)
-        return [(item['display_name'], item) for item in data]
-    except:
-        return []
-
-# --- 4. SIDEBAR ---
+# --- 3. SIDEBAR: BUGS ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=50)
-    st.title("Central Beta 🚧")
+    st.markdown("### 📍 Lugar (Beta)")
+    st.write("Encontrou um erro?")
     with st.form("bug_report"):
-        nome_bug = st.text_input("Seu Nome")
-        desc_bug = st.text_area("O que aconteceu?")
-        if st.form_submit_button("🐛 Reportar") and supabase:
-            supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": desc_bug, "ativo": False, "plano": nome_bug}).execute()
-            st.success("Enviado!")
+        desc = st.text_area("Descreva o problema")
+        if st.form_submit_button("Enviar Report") and supabase:
+            supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": desc, "ativo": False, "plano": "beta"}).execute()
+            st.success("Obrigado!")
 
-# --- 5. HEADER ---
-c1, c2 = st.columns([1, 10])
+# --- 4. HEADER (LIMPO E MODERNO) ---
+c1, c2 = st.columns([1, 12])
 with c2:
-    st.title("Receita Imob | Versão Beta")
-    st.markdown("""
-    <div class="feedback-box">
-        🚀 <b>Novo Recurso:</b> Pesquisa Inteligente! Digite o nome da loja ou local e selecione na lista.
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<h1 class="brand-title">Lugar</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="brand-subtitle">Onde você quer viver hoje?</p>', unsafe_allow_html=True)
 
 df_total = carregar_dados()
 
-# --- 6. BUSCA COM AUTOCOMPLETE ---
+# --- 5. BUSCA RÁPIDA (Volta ao Input Simples para não travar) ---
 with st.container(border=True):
-    c_search, c_type = st.columns([3, 1])
+    c_search, c_type, c_btn = st.columns([3, 1, 1])
     
     with c_search:
-        # AQUI ESTÁ A MÁGICA: st_searchbox
-        local_selecionado = st_searchbox(
-            buscar_sugestoes,
-            key="busca_gps",
-            placeholder="Digite o local (Ex: Glicínias, Hospital de São João...)",
-            clear_on_submit=False
-        )
-
+        local_input = st.text_input("Buscar endereço ou ponto de referência", placeholder="Ex: Lefties Aveiro, Hospital São João...")
+    
     with c_type:
-        st.write("") # Espaço visual
-        tipos = st.multiselect("Filtro", ["T1", "T2", "T3", "Quarto"], default=["T1", "T2"])
+        st.write("") # Ajuste visual
+        tipos = st.multiselect("Filtro", ["T1", "T2", "T3", "Quarto"], default=["T1", "T2"], label_visibility="collapsed", placeholder="Tipo")
 
-# --- 7. LÓGICA DO MAPA ---
+    with c_btn:
+        st.write("") 
+        buscar = st.button("🔍 Buscar")
+
+# --- 6. MAPA INTELIGENTE ---
 map_center = [39.55, -7.85] 
 zoom_start = 7
-ponto_referencia = None 
+ponto_referencia = None
 
-# Se o usuário SELECIONOU algo na lista (não precisa clicar em botão buscar)
-if local_selecionado:
-    # local_selecionado já vem com latitude e longitude da API!
-    lat_busca = float(local_selecionado['lat'])
-    lon_busca = float(local_selecionado['lon'])
-    nome_busca = local_selecionado['display_name'].split(",")[0] # Pega só o primeiro nome
-    
-    map_center = [lat_busca, lon_busca]
-    zoom_start = 15 # Zoom bem perto
-    ponto_referencia = (lat_busca, lon_busca, nome_busca)
-    
-    st.toast(f"📍 Indo para: {nome_busca}")
+# Lógica de GPS (Só roda quando clica no botão -> NÃO TRAVA)
+if buscar and local_input:
+    geolocator = Nominatim(user_agent="lugar_app_beta")
+    try:
+        loc = geolocator.geocode(f"{local_input}, Portugal", timeout=10)
+        if loc:
+            map_center = [loc.latitude, loc.longitude]
+            zoom_start = 15
+            ponto_referencia = loc
+            st.toast(f"📍 Localizado: {loc.address}")
+        else:
+            st.warning("Não encontramos esse local exato. Mostrando o mapa geral.")
+    except:
+        st.error("Erro de conexão. Tente novamente.")
 
-st.divider()
+st.write("") # Espaço
 
-m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="OpenStreetMap")
+m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="CartoDB positron") # CartoDB é mais limpo/moderno que OSM
 LocateControl(auto_start=True).add_to(m)
 Fullscreen().add_to(m)
 
-# 1. PINO DO LOCAL PESQUISADO
+# Pino do Local Pesquisado (Preto)
 if ponto_referencia:
     folium.Marker(
-        [ponto_referencia[0], ponto_referencia[1]],
-        popup=f"<b>🎯 {ponto_referencia[2]}</b>",
+        [ponto_referencia.latitude, ponto_referencia.longitude],
+        popup=f"<b>📍 SEU DESTINO</b>",
         icon=folium.Icon(color="black", icon="star", prefix="fa")
     ).add_to(m)
-    
-    folium.Circle(
-        location=[ponto_referencia[0], ponto_referencia[1]],
-        radius=1500, # 1.5km
-        color="black", fill=True, fill_opacity=0.05
-    ).add_to(m)
+    folium.Circle([ponto_referencia.latitude, ponto_referencia.longitude], radius=1500, color="#820AD1", fill=True, fill_opacity=0.05).add_to(m)
 
-# 2. IMÓVEIS
+# Imóveis (Roxo da Marca)
 marker_cluster = MarkerCluster().add_to(m)
 
 if not df_total.empty:
     for _, row in df_total.iterrows():
         if pd.notnull(row['lat']) and row['lat'] != 0:
             img = row.get('imagem') or "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&w=400&q=80"
-            preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
+            preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Consultar"
             
             html = f"""
             <div class="popup-card">
@@ -167,25 +164,31 @@ if not df_total.empty:
                 <div class="popup-body">
                     <div class="popup-price">{preco}</div>
                     <div class="popup-title">{row.get('titulo','')[:45]}...</div>
-                    <a href="{row.get('link')}" target="_blank" class="popup-btn">Ver Anúncio</a>
+                    <a href="{row.get('link')}" target="_blank" class="popup-btn">Ver Detalhes</a>
                 </div>
             </div>
             """
+            # Ícone Roxo customizado
             folium.Marker(
                 [row['lat'], row['lon']], 
                 popup=html, 
-                icon=folium.Icon(color="blue", icon="home", prefix="fa")
+                icon=folium.Icon(color="purple", icon="home", prefix="fa")
             ).add_to(marker_cluster)
 
 st_folium(m, width=None, height=600, returned_objects=[])
 
-# --- 8. LEAD MAGNET ---
+# --- 7. RODAPÉ LEAD ---
 st.write("---")
-st.header("🚀 Lista de Fundadores")
+st.markdown("<h3 style='text-align: center; color: #555;'>🚀 Seja um Membro Fundador</h3>", unsafe_allow_html=True)
 with st.form("lista_espera"):
-    c1, c2 = st.columns(2)
-    with c1: e = st.text_input("E-mail")
-    with c2: cid = st.text_input("Cidade")
-    if st.form_submit_button("✅ Entrar na Lista") and e and supabase:
-        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": cid, "ativo": True, "plano": "beta_v2"}).execute()
+    c1, c2, c3 = st.columns([2, 2, 1])
+    with c1: e = st.text_input("E-mail", placeholder="seu@email.com")
+    with c2: c = st.text_input("Cidade", placeholder="Onde procura?")
+    with c3: 
+        st.write("")
+        st.write("")
+        btn = st.form_submit_button("Entrar na Lista")
+    
+    if btn and e and supabase:
+        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": c, "ativo": True, "plano": "lugar_beta"}).execute()
         st.balloons()
