@@ -4,10 +4,31 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 
-# 1. Configuração da Página
-st.set_page_config(page_title="Receita Consensual | Imóveis", layout="wide", page_icon="🏢")
+# 1. Configuração Visual da Página
+st.set_page_config(
+    page_title="Receita Imob | Inteligência Imobiliária",
+    page_icon="🏠",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# 2. Conexão Supabase
+# CSS para deixar mais bonito (Esconde menu padrão e melhora fontes)
+st.markdown("""
+    <style>
+    .main {background-color: #f9f9f9;}
+    h1 {color: #2c3e50;}
+    .stButton>button {
+        width: 100%;
+        background-color: #ff4b4b;
+        color: white;
+        border-radius: 5px;
+        height: 3em;
+    }
+    .css-1d391kg {padding-top: 1rem;}
+    </style>
+    """, unsafe_allow_html=True)
+
+# 2. Conexão Segura
 @st.cache_resource
 def init_connection():
     try:
@@ -19,95 +40,91 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- BARRA LATERAL (ÁREA DO CLIENTE) ---
-st.sidebar.title("💎 Área Premium")
-st.sidebar.write("Configure seus alertas e receba novidades no Telegram.")
+# --- CABEÇALHO ---
+col_logo, col_text = st.columns([1, 4])
+with col_logo:
+    st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=80) # Logo genérico de casa
+with col_text:
+    st.title("Receita Imob")
+    st.markdown("**Encontramos o seu imóvel antes de ele ser anunciado.** Nossa inteligência artificial monitora o mercado 24h por dia.")
 
-with st.sidebar.form("form_alerta"):
-    st.write("### Criar Novo Alerta")
+st.divider()
+
+# --- COLUNAS PRINCIPAIS (MAPA + CADASTRO) ---
+col_mapa, col_premium = st.columns([2, 1])
+
+# --- ÁREA 1: O MAPA (GRATUITO) ---
+with col_mapa:
+    st.subheader("📍 Monitoramento em Tempo Real")
     
-    # Inputs do usuário
-    user_telegram = st.text_input("Seu ID do Telegram", help="Mande /start no nosso bot para saber seu ID")
-    local_desejado = st.text_input("Onde você quer morar?", value="Aveiro Centro")
-    tipo_imovel = st.selectbox("Tipo", ["Apartamento T1", "Apartamento T2", "Quarto", "Casa"])
+    # Busca dados no banco
+    df = pd.DataFrame()
+    if supabase:
+        try:
+            response = supabase.table("imoveis").select("*").execute()
+            df = pd.DataFrame(response.data)
+        except:
+            pass
+
+    if not df.empty:
+        # Mapa focado em Portugal (média das coordenadas ou fixo)
+        lat_centro = df['lat'].mean() if 'lat' in df.columns else 39.5
+        lon_centro = df['lon'].mean() if 'lon' in df.columns else -8.0
+        
+        m = folium.Map(location=[lat_centro, lon_centro], zoom_start=7)
+
+        for index, row in df.iterrows():
+            lat, lon = row.get('lat'), row.get('lon')
+            if lat and lon:
+                html = f"""
+                <div style='font-family: Arial; width: 180px;'>
+                    <h4 style='margin:0; color:#2c3e50;'>{row.get('titulo', 'Imóvel')}</h4>
+                    <p style='margin:5px 0; font-size:12px;'>📍 {row.get('endereco', '')}</p>
+                    <a href='{row.get('link', '#')}' target='_blank' style='display:block; background:#ff4b4b; color:white; text-align:center; padding:5px; text-decoration:none; border-radius:4px; font-size:12px;'>Ver Detalhes</a>
+                </div>
+                """
+                folium.Marker(
+                    [lat, lon],
+                    popup=html,
+                    icon=folium.Icon(color="red", icon="home")
+                ).add_to(m)
+
+        st_folium(m, width=None, height=500)
+    else:
+        st.info("📡 Calibrando satélites... O mapa será atualizado em instantes.")
+
+# --- ÁREA 2: CADASTRO PREMIUM (EMAIL) ---
+with col_premium:
+    st.container(border=True)
+    st.markdown("### 💎 Seja o Primeiro a Saber")
+    st.write("Receba um e-mail no **exato momento** que um imóvel compatível aparecer. Chegue antes da concorrência.")
     
-    # Botão de salvar
-    submitted = st.form_submit_button("🔔 Ativar Alerta")
-    
-    if submitted and supabase:
-        if user_telegram and local_desejado:
-            termo_final = f"{tipo_imovel} {local_desejado}"
-            
-            try:
-                # Salva na tabela que o Bot lê
+    with st.form("form_cadastro"):
+        nome = st.text_input("Seu Nome")
+        email = st.text_input("Seu Melhor E-mail")
+        zona = st.text_input("Cidade ou Bairro de Interesse", placeholder="Ex: Trindade, Porto")
+        tipo = st.selectbox("O que procura?", ["Apartamento T1", "Apartamento T2", "Apartamento T3+", "Casa/Moradia", "Quarto"])
+        
+        btn_assinar = st.form_submit_button("🚀 Ativar Alertas (Grátis Beta)")
+        
+        if btn_assinar and supabase:
+            if email and zona:
+                termo_busca = f"{tipo} {zona}"
                 dados = {
-                    "user_id": user_telegram, 
-                    "termo_busca": termo_final, 
-                    "plano": "site_user",
+                    "user_id": email,  # Agora salvamos o EMAIL no lugar do ID
+                    "termo_busca": termo_busca,
+                    "plano": "waitlist",
                     "ativo": True
                 }
-                supabase.table("alertas_clientes").insert(dados).execute()
-                st.success(f"Sucesso! O Robô vai buscar '{termo_final}' para você.")
-            except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
-        else:
-            st.warning("Preencha o ID e o Local.")
+                try:
+                    supabase.table("alertas_clientes").insert(dados).execute()
+                    st.success(f"Parabéns, {nome}! Você receberá alertas de **{zona}** em **{email}**.")
+                    st.balloons()
+                except Exception as e:
+                    st.error("Erro ao cadastrar. Talvez esse e-mail já esteja na lista.")
+            else:
+                st.warning("Por favor, preencha o e-mail e a zona.")
 
-st.sidebar.divider()
-st.sidebar.info("💡 **Dica:** Use o mapa ao lado para ver o que já encontramos hoje.")
-
-# --- ÁREA PRINCIPAL (MAPA GRATUITO) ---
-st.title("🗺️ Mapa de Oportunidades - Tempo Real")
-
-if not supabase:
-    st.error("Erro de conexão com o banco de dados. Verifique as chaves.")
-    st.stop()
-
-# Busca imóveis no banco
-try:
-    response = supabase.table("imoveis").select("*").execute()
-    df = pd.DataFrame(response.data)
-except:
-    df = pd.DataFrame()
-
-if not df.empty:
-    # Métricas no topo
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Imóveis Monitorados", len(df))
-    col1.metric("Preço Médio", f"€ {df['preco'].mean():.0f}" if 'preco' in df.columns else "N/A")
-    col2.metric("Última Atualização", "Agora mesmo")
-
-    # Mapa
-    # Tenta centralizar onde tem mais imóveis ou em Aveiro padrão
-    lat_centro = df['lat'].mean() if 'lat' in df.columns else 40.6405
-    lon_centro = df['lon'].mean() if 'lon' in df.columns else -8.6538
-    
-    m = folium.Map(location=[lat_centro, lon_centro], zoom_start=12)
-
-    # Adiciona os pontos
-    for index, row in df.iterrows():
-        lat = row.get('lat', 0)
-        lon = row.get('lon', 0)
-        
-        if lat != 0 and lon != 0:
-            html = f"""
-            <div style='font-family: sans-serif; width: 200px;'>
-                <b>{row.get('titulo', 'Imóvel')}</b><br>
-                📍 {row.get('endereco', '')}<br>
-                <a href='{row.get('link', '#')}' target='_blank' style='background-color:#4CAF50; color:white; padding:5px; text-decoration:none; display:block; text-align:center; margin-top:5px; border-radius:4px;'>Ver Anúncio</a>
-            </div>
-            """
-            
-            folium.Marker(
-                [lat, lon],
-                popup=html,
-                icon=folium.Icon(color="blue", icon="home")
-            ).add_to(m)
-
-    st_folium(m, width=None, height=600)
-    
-    st.write("### Últimos Encontrados")
-    st.dataframe(df[['titulo', 'link', 'endereco']], use_container_width=True)
-
-else:
-    st.info("O Robô está caçando imóveis... Volte em alguns minutos ou configure um alerta na barra lateral!")
+# --- RODAPÉ ---
+st.markdown("---")
+st.markdown("<center><small>Receita Consensual Imob © 2026 - Tecnologia de Dados aplicada ao Mercado Imobiliário.</small></center>", unsafe_allow_html=True)
