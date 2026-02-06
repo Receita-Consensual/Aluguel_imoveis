@@ -5,6 +5,7 @@ import folium
 from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
 
 # --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
@@ -14,7 +15,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS LIMPO
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -32,13 +32,8 @@ st.markdown("""
         padding: 8px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 12px; margin-top: 8px;
     }
     
-    /* Caixa de Feedback */
     .feedback-box {
-        background-color: #f1f2f6;
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 5px solid #ff4757;
-        margin-bottom: 20px;
+        background-color: #f1f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4757; margin-bottom: 20px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -46,10 +41,8 @@ st.markdown("""
 # --- 2. CONEXÃO & CACHE ---
 @st.cache_resource
 def init_connection():
-    try:
-        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-    except:
-        return None
+    try: return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    except: return None
 
 supabase = init_connection()
 
@@ -57,91 +50,101 @@ supabase = init_connection()
 def carregar_dados():
     if not supabase: return pd.DataFrame()
     try:
-        # Filtra lat!=0 e ordena
-        response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(600).execute()
+        response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(800).execute()
         return pd.DataFrame(response.data)
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
-# --- 3. SIDEBAR: REPORTAR BUGS ---
+# --- 3. SIDEBAR: BUGS ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=50)
     st.title("Central Beta 🚧")
-    st.write("Encontrou um erro? O mapa travou? O endereço está errado?")
-    
     with st.form("bug_report"):
-        nome_bug = st.text_input("Teu Nome")
+        nome_bug = st.text_input("Seu Nome")
         desc_bug = st.text_area("O que aconteceu?")
-        if st.form_submit_button("🐛 Reportar Bug") and supabase and desc_bug:
-            # Salva no supabase (usando a tabela alertas por enquanto ou crie uma nova 'bugs')
-            supabase.table("alertas_clientes").insert({
-                "user_id": "BUG_REPORT", 
-                "termo_busca": desc_bug, 
-                "ativo": False, 
-                "plano": f"bug_de_{nome_bug}"
-            }).execute()
-            st.success("Obrigado! Vamos corrigir.")
-            
-    st.divider()
-    st.info("Desenvolvido por Nicolas & Ana.")
+        if st.form_submit_button("🐛 Reportar") and supabase:
+            supabase.table("alertas_clientes").insert({"user_id": "BUG", "termo_busca": desc_bug, "ativo": False, "plano": nome_bug}).execute()
+            st.success("Enviado!")
 
-# --- 4. HEADER & PESQUISA ---
+# --- 4. HEADER ---
 c1, c2 = st.columns([1, 10])
 with c2:
     st.title("Receita Imob | Versão Beta")
     st.markdown("""
     <div class="feedback-box">
-        🚧 <b>Estamos em Testes!</b><br>
-        O acesso é gratuito. Use à vontade, mas saiba que pode haver erros.
-        Ajude-nos a melhorar reportando problemas na barra lateral.
+        🎯 <b>Nova Função:</b> Pesquise por lojas ou pontos exatos (ex: "Lefties Aveiro", "Hospital São João") para ver casas perto deles.
     </div>
     """, unsafe_allow_html=True)
 
 df_total = carregar_dados()
 
-# Filtros (SEM BLOQUEIO PRO - TUDO LIBERADO NO BETA)
+# --- 5. BUSCA INTELIGENTE ---
 with st.container(border=True):
     c_search, c_type, c_btn = st.columns([3, 2, 1])
     with c_search:
-        local_input = st.text_input("Para onde vamos?", placeholder="Ex: Aveiro, Porto, Lisboa...")
+        # Agora o placeholder sugere buscar LOJAS
+        local_input = st.text_input("Onde você precisa ir todo dia?", placeholder="Ex: Lefties Aveiro, Universidade do Porto...")
     with c_type:
-        # Tudo liberado para teste
         tipos = st.multiselect("Tipo", ["T1", "T2", "T3", "Quarto", "Casa"], default=["T1", "T2"])
     with c_btn:
         st.write(""); st.write("")
-        filtrar = st.button("🔍 Buscar", use_container_width=True)
+        filtrar = st.button("🔍 Buscar Local", use_container_width=True)
 
-# --- 5. LÓGICA DO MAPA ---
+# --- 6. LÓGICA DO MAPA (GPS PRECISO) ---
 map_center = [39.55, -7.85] 
 zoom_start = 7
-df_show = df_total.copy()
+ponto_referencia = None # Vai guardar o local da loja (Lefties)
 
-if local_input and not df_show.empty:
-    df_show = df_show[df_show['endereco'].str.contains(local_input, case=False, na=False)]
-
+# Se o usuário buscou algo
 if local_input:
-    if not df_show.empty:
-        map_center = [df_show['lat'].mean(), df_show['lon'].mean()]
-        zoom_start = 12
-    else:
-        try:
-            loc = Nominatim(user_agent="ri_beta").geocode(f"{local_input}, Portugal")
-            if loc:
-                map_center = [loc.latitude, loc.longitude]
-                zoom_start = 13
-                st.toast(f"Ainda sem imóveis em {local_input}, mas estamos monitorando!")
-        except: pass
+    geolocator = Nominatim(user_agent="ri_beta_finder")
+    try:
+        # Tenta achar o local exato (Ex: Lefties)
+        loc = geolocator.geocode(f"{local_input}, Portugal", timeout=10)
+        
+        if loc:
+            map_center = [loc.latitude, loc.longitude]
+            zoom_start = 14 # Zoom bem perto
+            ponto_referencia = loc # Guardamos para desenhar o pino preto
+            st.toast(f"📍 Localizado: {loc.address}")
+        else:
+            st.warning("Não encontrei esse local exato. Mostrando visão geral.")
+            
+    except Exception as e:
+        st.error("Erro no GPS. Tente novamente.")
 
 st.divider()
 
 m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="OpenStreetMap")
 LocateControl(auto_start=True).add_to(m)
 Fullscreen().add_to(m)
+
+# 1. DESENHA O PINO DA BUSCA (A LOJA)
+if ponto_referencia:
+    folium.Marker(
+        [ponto_referencia.latitude, ponto_referencia.longitude],
+        popup=f"<b>📍 SEU DESTINO</b><br>{ponto_referencia.address}",
+        icon=folium.Icon(color="black", icon="star", prefix="fa")
+    ).add_to(m)
+    
+    # Desenha um círculo de 2km em volta da loja
+    folium.Circle(
+        location=[ponto_referencia.latitude, ponto_referencia.longitude],
+        radius=2000, # 2km
+        color="black",
+        fill=True,
+        fill_opacity=0.05
+    ).add_to(m)
+
+# 2. DESENHA OS IMÓVEIS (AS CASAS)
 marker_cluster = MarkerCluster().add_to(m)
 
-if not df_show.empty:
-    for _, row in df_show.iterrows():
+if not df_total.empty:
+    for _, row in df_total.iterrows():
         if pd.notnull(row['lat']) and row['lat'] != 0:
+            
+            # Se tiver filtro de local e achamos um ponto, podemos filtrar visualmente?
+            # Por enquanto mostramos todos para encher o mapa, mas o foco está na loja
+            
             img = row.get('imagem') or "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&w=400&q=80"
             preco = f"€ {row['preco']:,.0f}" if row.get('preco', 0) > 0 else "Sob Consulta"
             
@@ -163,24 +166,14 @@ if not df_show.empty:
 
 st_folium(m, width=None, height=600, returned_objects=[])
 
-# --- 6. CAPTURA DE LEADS (FUTURO DINHEIRO) ---
+# --- 7. RODAPÉ DE LEADS ---
 st.write("---")
-st.header("🚀 Quer garantir acesso VIP no lançamento oficial?")
-st.write("Quem se inscrever agora vai manter o acesso com desconto vitalício quando o app ficar pago.")
-
+st.header("🚀 Lista de Fundadores")
+st.write("Garanta acesso vitalício ao preço de lançamento.")
 with st.form("lista_espera"):
-    col_lead1, col_lead2 = st.columns(2)
-    with col_lead1:
-        email_lead = st.text_input("Seu melhor E-mail")
-    with col_lead2:
-        cidade_lead = st.text_input("Cidade de Interesse")
-        
-    if st.form_submit_button("✅ Entrar na Lista de Fundadores") and email_lead and supabase:
-        supabase.table("alertas_clientes").insert({
-            "user_id": email_lead, 
-            "termo_busca": cidade_lead, 
-            "ativo": True, 
-            "plano": "beta_founder"
-        }).execute()
+    c1, c2 = st.columns(2)
+    with c1: e = st.text_input("E-mail")
+    with c2: cid = st.text_input("Cidade")
+    if st.form_submit_button("✅ Entrar na Lista") and e and supabase:
+        supabase.table("alertas_clientes").insert({"user_id": e, "termo_busca": cid, "ativo": True, "plano": "beta"}).execute()
         st.balloons()
-        st.success("Parabéns! Você é um Membro Fundador. Aproveite o beta grátis!")
