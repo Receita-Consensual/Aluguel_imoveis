@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Coordenadas de Segurança (Para onde o mapa vai se não tiver GPS)
+# Coordenadas de Segurança
 COORDS_FIXAS = {
     "aveiro": [40.6405, -8.6538],
     "porto": [41.1579, -8.6291],
@@ -38,7 +38,6 @@ st.markdown("""
     html, body, [class*="css"] {font-family: 'Roboto', sans-serif;}
     #MainMenu, footer, header {visibility: hidden;}
     
-    /* Card do Mapa */
     .map-card {
         background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
         width: 250px; overflow: hidden; font-family: 'Roboto', sans-serif;
@@ -65,7 +64,47 @@ supabase = init_connection()
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_plan' not in st.session_state: st.session_state['user_plan'] = 'free'
 
-# --- 4. BARRA LATERAL ---
+# --- 4. FUNÇÃO DE DADOS BLINDADA (CACHE) ---
+# Aqui está a correção: TTL de 60s impede o pisca-pisca
+@st.cache_data(ttl=60)
+def carregar_dados_estaveis(preco_max, cidade_filtro):
+    if not supabase: return pd.DataFrame()
+    
+    try:
+        # Pega dados (Aumentado para 3000)
+        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(3000).execute()
+        df_raw = pd.DataFrame(response.data)
+        
+        if df_raw.empty: return pd.DataFrame()
+        
+        # Filtros
+        df = df_raw[df_raw['preco'] <= preco_max]
+        if cidade_filtro != "Todas":
+            df = df[df['endereco'].str.contains(cidade_filtro, case=False, na=False)]
+            
+        # Correção Lat/Lon (DENTRO DO CACHE = ESTABILIDADE)
+        def corrigir_lat(row):
+            if row['lat'] != 0: return row['lat']
+            end = str(row['endereco']).lower()
+            for c, coords in COORDS_FIXAS.items():
+                if c in end: return coords[0] + random.uniform(-0.015, 0.015)
+            return 39.5
+
+        def corrigir_lon(row):
+            if row['lon'] != 0: return row['lon']
+            end = str(row['endereco']).lower()
+            for c, coords in COORDS_FIXAS.items():
+                if c in end: return coords[1] + random.uniform(-0.015, 0.015)
+            return -8.0
+
+        df['lat'] = df.apply(corrigir_lat, axis=1)
+        df['lon'] = df.apply(corrigir_lon, axis=1)
+        
+        return df
+    except:
+        return pd.DataFrame()
+
+# --- 5. BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
     st.markdown("### Receita Imob")
@@ -83,7 +122,7 @@ with st.sidebar:
                         st.session_state['user_plan'] = res.data[0]['plano']
                         st.rerun()
                     else:
-                        st.error("Erro no login")
+                        st.error("Erro")
     else:
         st.success("Logado como PRO")
         if st.button("Sair"):
@@ -91,67 +130,27 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    
-    # Filtros
     filtro_cidade = st.selectbox("📍 Filtrar Cidade", ["Todas"] + [k.capitalize() for k in sorted(COORDS_FIXAS.keys())])
-    filtro_preco = st.slider("💰 Preço Máximo", 0, 5000, 2000)
+    filtro_preco = st.slider("💰 Preço Máximo", 0, 5000, 2500)
 
-    # Contador para Debug (Para você ver se está carregando)
-    st.caption("Status do Sistema:")
+# --- 6. EXECUÇÃO ---
+# Chama a função cacheada
+df = carregar_dados_estaveis(filtro_preco, filtro_cidade)
 
-# --- 5. CARREGAMENTO E CORREÇÃO DE DADOS ---
-df = pd.DataFrame()
+if not df.empty:
+    st.sidebar.success(f"Carregados: {len(df)}")
+else:
+    st.sidebar.warning("Carregando...")
 
-if supabase:
-    try:
-        # Pega TUDO (aumentei o limite para 2000)
-        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(2000).execute()
-        df_raw = pd.DataFrame(response.data)
-        
-        if not df_raw.empty:
-            # Filtro de Preço
-            df = df_raw[df_raw['preco'] <= filtro_preco]
-            
-            # Filtro de Cidade (Texto)
-            if filtro_cidade != "Todas":
-                df = df[df['endereco'].str.contains(filtro_cidade, case=False, na=False)]
-            
-            st.sidebar.success(f"Carregados: {len(df)} imóveis")
-            
-            # CORREÇÃO DE COORDENADAS (Sem Cache para garantir funcionamento)
-            def corrigir_lat(row):
-                if row['lat'] != 0: return row['lat']
-                end = str(row['endereco']).lower()
-                for cidade, coords in COORDS_FIXAS.items():
-                    if cidade in end: return coords[0] + random.uniform(-0.01, 0.01)
-                return 39.5
-
-            def corrigir_lon(row):
-                if row['lon'] != 0: return row['lon']
-                end = str(row['endereco']).lower()
-                for cidade, coords in COORDS_FIXAS.items():
-                    if cidade in end: return coords[1] + random.uniform(-0.01, 0.01)
-                return -8.0
-
-            df['lat'] = df.apply(corrigir_lat, axis=1)
-            df['lon'] = df.apply(corrigir_lon, axis=1)
-
-    except Exception as e:
-        st.error(f"Erro ao carregar: {e}")
-
-# --- 6. MAPA (OpenStreetMap) ---
-
-# Define onde o mapa começa
+# --- 7. MAPA ---
+# Centro do Mapa
 if not df.empty and filtro_cidade != "Todas":
-    # Foca na cidade filtrada
     center = [df['lat'].mean(), df['lon'].mean()]
     zoom = 13
 elif not df.empty:
-    # Foca nos dados gerais
-    center = [df['lat'].mean(), df['lon'].mean()]
+    center = [39.6, -8.0] # Visão Portugal
     zoom = 7
 else:
-    # Foca em Portugal
     center = [39.6, -8.0]
     zoom = 7
 
@@ -163,7 +162,6 @@ marker_cluster = MarkerCluster().add_to(m)
 
 if not df.empty:
     for _, row in df.iterrows():
-        # Só mostra se tiver coord válida
         if row['lat'] != 39.5: 
             img = row.get('imagem')
             if not img or str(img) == 'nan': img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
@@ -190,4 +188,5 @@ if not df.empty:
                 icon=folium.Icon(color="blue", icon="home", prefix="fa")
             ).add_to(marker_cluster)
 
-st_folium(m, width=None, height=700)
+# returned_objects=[] é o segredo para o mapa não recarregar a pagina ao clicar
+st_folium(m, width=None, height=700, returned_objects=[])
