@@ -2,59 +2,87 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import folium
-from folium.plugins import MarkerCluster, Fullscreen
+from folium.plugins import MarkerCluster, Fullscreen, LocateControl
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
-import time
+import random # Para espalhar os pinos e não ficarem amontoados
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO VISUAL ---
 st.set_page_config(
     page_title="Receita Imob",
-    page_icon="🏢",
+    page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS PROFISSIONAL
+# Coordenadas de "Resgate" (Se o robô não pegou lat/lon, usamos estas)
+COORDS_FIXAS = {
+    "aveiro": [40.6405, -8.6538],
+    "porto": [41.1579, -8.6291],
+    "lisboa": [38.7223, -9.1393],
+    "braga": [41.5454, -8.4265],
+    "coimbra": [40.2033, -8.4103],
+    "faro": [37.0194, -7.9304],
+    "leiria": [39.7495, -8.8077],
+    "setúbal": [38.5244, -8.8882],
+    "viseu": [40.6566, -7.9124],
+    "viana": [41.6918, -8.8344],
+    "figueira": [40.1517, -8.8569]
+}
+
+# CSS (Estilo Google Maps Clean)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-    html, body, [class*="css"] {font-family: 'Inter', sans-serif;}
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    html, body, [class*="css"] {font-family: 'Roboto', sans-serif;}
+    #MainMenu, footer, header {visibility: hidden;}
     
-    /* Login Box */
-    .login-box {
-        background-color: #f0f2f6;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #dcdcdc;
-        margin-bottom: 20px;
-    }
+    .stApp {background-color: #ffffff;}
     
-    /* Badge PRO */
-    .badge-pro {
-        background-color: #ffd700;
-        color: black;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-weight: bold;
-        font-size: 12px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    /* Botão Principal */
-    .stButton>button {
-        background-color: #000;
-        color: white;
+    /* Card do Mapa (Estilo Google) */
+    .map-card {
+        background: white;
         border-radius: 8px;
-        font-weight: 600;
-        border: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        width: 250px;
+        overflow: hidden;
+        font-family: 'Roboto', sans-serif;
+    }
+    .map-img {
+        height: 140px;
+        width: 100%;
+        object-fit: cover;
+    }
+    .map-info {
+        padding: 10px;
+    }
+    .map-price {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1a73e8; /* Azul Google */
+    }
+    .map-title {
+        font-size: 14px;
+        color: #202124;
+        margin: 4px 0;
+        white-space: nowrap; 
+        overflow: hidden; 
+        text-overflow: ellipsis;
+    }
+    .btn-maps {
+        display: block;
+        margin-top: 8px;
+        text-align: center;
+        background: #1a73e8;
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        text-decoration: none;
+        font-weight: 500;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO & SESSÃO ---
+# --- 2. CONEXÃO ---
 @st.cache_resource
 def init_connection():
     try:
@@ -64,190 +92,138 @@ def init_connection():
 
 supabase = init_connection()
 
-# Inicializa variaveis de sessão (Memória do navegador)
+# --- 3. SESSÃO & LOGIN (Simplificado) ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-if 'user_name' not in st.session_state:
-    st.session_state['user_name'] = ''
 if 'user_plan' not in st.session_state:
     st.session_state['user_plan'] = 'free'
 
-# --- 3. BARRA LATERAL (LOGIN & CONTA) ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
-
-if not st.session_state['logged_in']:
-    # --- TELA DE LOGIN ---
-    st.sidebar.header("🔐 Área do Membro")
-    with st.sidebar.form("login_form"):
-        email_login = st.text_input("E-mail")
-        senha_login = st.text_input("Senha", type="password")
-        btn_entrar = st.form_submit_button("Entrar")
-        
-        if btn_entrar and supabase:
-            try:
-                # Verifica no banco
-                response = supabase.table("usuarios").select("*").eq("email", email_login).eq("senha", senha_login).execute()
-                if response.data:
-                    user = response.data[0]
-                    st.session_state['logged_in'] = True
-                    st.session_state['user_name'] = user['nome']
-                    st.session_state['user_plan'] = user['plano']
-                    st.rerun() # Recarrega a página logado
-                else:
-                    st.error("E-mail ou senha incorretos.")
-            except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+# --- 4. BARRA LATERAL ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2942/2942544.png", width=50)
+    st.markdown("### Receita Imob")
     
-    st.sidebar.markdown("---")
-    st.sidebar.info("Não tem conta? Fale com o suporte para assinar o plano PRO.")
-
-else:
-    # --- TELA LOGADO (PERFIL) ---
-    st.sidebar.success(f"Bem-vindo, {st.session_state['user_name']}!")
-    
-    if st.session_state['user_plan'] == 'pro':
-        st.sidebar.markdown("<span class='badge-pro'>💎 MEMBRO PRO</span>", unsafe_allow_html=True)
-        st.sidebar.write("✅ Filtros Avançados: Ativo")
-        st.sidebar.write("✅ Alertas em Tempo Real: Ativo")
+    # Login Rápido
+    if not st.session_state['logged_in']:
+        with st.expander("🔐 Entrar (Membros)"):
+            email = st.text_input("Email")
+            senha = st.text_input("Senha", type="password")
+            if st.button("Entrar"):
+                # Validação Fake Rápida para Teste (Ou conecta no banco)
+                if supabase:
+                    res = supabase.table("usuarios").select("*").eq("email", email).eq("senha", senha).execute()
+                    if res.data:
+                        st.session_state['logged_in'] = True
+                        st.session_state['user_plan'] = res.data[0]['plano']
+                        st.rerun()
+                    else:
+                        st.error("Dados incorretos")
     else:
-        st.sidebar.warning("Plano Gratuito")
-        st.sidebar.button("💎 Quero ser PRO")
+        st.success("Logado como PRO")
+        if st.button("Sair"):
+            st.session_state['logged_in'] = False
+            st.rerun()
 
-    if st.sidebar.button("Sair"):
-        st.session_state['logged_in'] = False
-        st.session_state['user_plan'] = 'free'
-        st.rerun()
-
-# --- 4. HEADER & BANNER ---
-col_head1, col_head2 = st.columns([1, 12])
-with col_head2:
-    st.title("Receita Imob")
-    if st.session_state['user_plan'] != 'pro':
-        st.caption("Versão Gratuita - Atualizada a cada 30min")
-    else:
-        st.caption("⚡ Versão PRO - Monitoramento em Tempo Real Ativo")
-
-# Banner só aparece para quem NÃO é Pro
-if st.session_state['user_plan'] != 'pro':
-    st.info("🔒 Você está visualizando o modo visitante. Assine o PRO para liberar filtros múltiplos e alertas instantâneos.")
-
-# --- 5. ÁREA DE BUSCA INTELIGENTE ---
-with st.container(border=True):
-    c1, c2, c3 = st.columns([4, 2, 1])
+    st.divider()
     
-    with c1:
-        local_busca = st.text_input("📍 Onde você quer morar?", placeholder="Ex: Porto, Aveiro, Lisboa...")
-    
-    with c2:
-        # LÓGICA DE BLOQUEIO DO FILTRO
-        opcoes_tipo = ["Apartamento T1", "Apartamento T2", "Apartamento T3", "Quarto", "Casa"]
-        
-        filtro_tipo = st.multiselect(
-            "Tipo de Imóvel", 
-            opcoes_tipo,
-            default=["Apartamento T1"]
-        )
-        
-        # AQUI É O PULO DO GATO: Se não for PRO, bloqueia
-        if len(filtro_tipo) > 1 and st.session_state['user_plan'] != 'pro':
-            st.toast("🔒 Multi-seleção é exclusivo para assinantes PRO.", icon="🚫")
-            filtro_tipo = [filtro_tipo[0]] # Força a ficar só com 1
-            st.warning("⚠️ Limite Grátis: Apenas 1 tipo por vez.")
+    # FILTROS
+    filtro_cidade = st.selectbox("📍 Cidade", ["Todas", "Aveiro", "Porto", "Lisboa", "Braga", "Coimbra", "Faro"])
+    filtro_preco = st.slider("💰 Preço Máximo", 300, 5000, 2000)
 
-    with c3:
-        st.write("") 
-        st.write("") 
-        buscar = st.button("🔍 Buscar")
-
-# --- 6. DADOS E MAPA ---
+# --- 5. LOGICA DE DADOS (CORREÇÃO DE COORDENADAS) ---
 df = pd.DataFrame()
-map_center = [39.5, -8.0]
-zoom_start = 7
 
 if supabase:
     try:
-        query = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(800)
-        response = query.execute()
-        df = pd.DataFrame(response.data)
+        # Pega TUDO (1000 imóveis)
+        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(1000).execute()
+        df_raw = pd.DataFrame(response.data)
         
-        # Filtro de Texto (Local)
-        if local_busca and not df.empty:
-            df = df[df['endereco'].str.contains(local_busca, case=False, na=False)]
-            # Ajusta zoom se achou algo
-            if not df.empty:
-                map_center = [df['lat'].mean(), df['lon'].mean()]
-                zoom_start = 12
-            else:
-                # Se não achou no banco, tenta geocoding para centralizar o mapa vazio lá
-                try:
-                    loc = Nominatim(user_agent="rimob").geocode(f"{local_busca}, Portugal")
-                    if loc:
-                        map_center = [loc.latitude, loc.longitude]
-                        zoom_start = 13
-                except: pass
+        if not df_raw.empty:
+            # --- CORREÇÃO DE COORDENADAS (LAT 0 vira LAT DA CIDADE) ---
+            def corrigir_lat(row):
+                if row['lat'] != 0: return row['lat']
+                # Se for 0, tenta achar a cidade no endereço
+                end = str(row['endereco']).lower()
+                for cidade, coords in COORDS_FIXAS.items():
+                    if cidade in end:
+                        # Adiciona um "ruído" aleatório para não ficarem empilhados
+                        return coords[0] + random.uniform(-0.02, 0.02) 
+                return 39.5 # Centro Portugal (Fallback)
 
+            def corrigir_lon(row):
+                if row['lon'] != 0: return row['lon']
+                end = str(row['endereco']).lower()
+                for cidade, coords in COORDS_FIXAS.items():
+                    if cidade in end:
+                        return coords[1] + random.uniform(-0.02, 0.02)
+                return -8.0
+
+            df_raw['lat'] = df_raw.apply(corrigir_lat, axis=1)
+            df_raw['lon'] = df_raw.apply(corrigir_lon, axis=1)
+            
+            # Aplica Filtros
+            df = df_raw[df_raw['preco'] <= filtro_preco]
+            if filtro_cidade != "Todas":
+                # Filtro simples de string
+                df = df[df['endereco'].str.contains(filtro_cidade, case=False, na=False)]
+                
     except Exception as e:
-        st.error(f"Erro de conexão: {e}")
+        st.error(f"Erro: {e}")
 
-# Renderiza Mapa
-st.divider()
+# --- 6. MAPA ESTILO GOOGLE ---
+# Se não tiver dados filtrados, mostra Portugal inteiro
+center = [39.6, -8.0]
+zoom = 7
 
 if not df.empty:
-    m = folium.Map(location=map_center, zoom_start=zoom_start, tiles="CartoDB positron")
-    Fullscreen().add_to(m)
-    marker_cluster = MarkerCluster().add_to(m)
+    center = [df['lat'].mean(), df['lon'].mean()]
+    zoom = 10 if filtro_cidade == "Todas" else 13
 
-    for _, row in df.iterrows():
-        if row['lat'] and row['lon'] and row['lat'] != 0:
-            # Foto
-            img_url = row.get('imagem')
-            if not img_url: img_url = "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&w=400&q=80"
-            
-            # Preço
-            preco = row.get('preco', 0)
-            preco_fmt = f"€ {preco:,.0f}" if preco > 0 else "Sob Consulta"
-            
-            # Popup
-            html = f"""
-            <div style="width:200px; font-family:sans-serif;">
-                <img src="{img_url}" style="width:100%; height:120px; object-fit:cover; border-radius:8px 8px 0 0;">
-                <div style="padding:8px;">
-                    <div style="color:#2c3e50; font-weight:bold;">{preco_fmt}</div>
-                    <div style="font-size:12px; margin-top:4px;">{row.get('titulo', '')[:40]}...</div>
-                    <a href="{row.get('link')}" target="_blank" style="display:block; background:#000; color:fff; text-align:center; padding:6px; border-radius:4px; text-decoration:none; margin-top:8px; font-size:11px;">Ver Detalhes</a>
-                </div>
-            </div>
-            """
-            folium.Marker(
-                [row['lat'], row['lon']],
-                popup=html,
-                icon=folium.Icon(color="black", icon="home", prefix="fa")
-            ).add_to(marker_cluster)
+# CRIAÇÃO DO MAPA (TILES OPENSTREETMAP = Colorido e Detalhado)
+m = folium.Map(
+    location=center, 
+    zoom_start=zoom,
+    tiles="OpenStreetMap", # MUDANÇA AQUI: Mapa colorido com ruas
+    control_scale=True
+)
 
-    st_folium(m, width=None, height=600)
-    st.caption(f"Exibindo {len(df)} resultados.")
-else:
-    st.info("Nenhum imóvel encontrado nesta região no momento.")
+LocateControl().add_to(m) # Botão de GPS
+Fullscreen().add_to(m)    # Botão Tela Cheia
 
-# --- 7. ÁREA PREMIUM (ALERTAS) ---
-st.divider()
-st.header("🔔 Alertas Automáticos")
+marker_cluster = MarkerCluster().add_to(m)
 
-if st.session_state['user_plan'] == 'pro':
-    # VISÃO DO PRO: Painel de Controle
-    st.success("✅ Seu plano PRO permite criar alertas ilimitados.")
-    with st.form("alerta_pro"):
-        c_a1, c_a2 = st.columns(2)
-        with c_a1: st.text_input("Qual zona monitorar?", placeholder="Ex: Matosinhos Sul")
-        with c_a2: st.multiselect("Tipos", ["T1", "T2", "T3"], default=["T2"])
-        if st.form_submit_button("Criar Novo Robô de Alerta"):
-            st.success("Robô configurado! Você receberá e-mails assim que encontrarmos.")
-            # Aqui conectaria ao Supabase tabela alertas
-            
-else:
-    # VISÃO DO FREE: Propaganda
-    st.write("Deseja ser avisado quando um imóvel aparecer aqui?")
-    c_l1, c_l2 = st.columns([3,1])
-    with c_l1: st.text_input("Seu E-mail", placeholder="seu@email.com", disabled=True, help="Disponível apenas para PRO")
-    with c_l2: st.button("Destravar Alertas", disabled=True)
-    st.caption("🔒 Faça login como PRO para ativar esta função.")
+for _, row in df.iterrows():
+    # Garante que temos foto
+    img = row.get('imagem')
+    if not img or str(img) == 'nan' or str(img) == 'None':
+        img = "https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=400&q=80"
+    
+    preco = f"€ {row['preco']:,.0f}" if row['preco'] > 0 else "Sob Consulta"
+    
+    # HTML DO POPUP (Estilo Card Google Maps)
+    html = f"""
+    <div class="map-card">
+        <img src="{img}" class="map-img">
+        <div class="map-info">
+            <div class="map-price">{preco}</div>
+            <div class="map-title">{row.get('titulo', 'Imóvel')}</div>
+            <div style="font-size:11px; color:#666;">📍 {row.get('endereco', '')}</div>
+            <a href="{row.get('link')}" target="_blank" class="btn-maps">
+                Ver Anúncio ↗
+            </a>
+        </div>
+    </div>
+    """
+    
+    folium.Marker(
+        [row['lat'], row['lon']],
+        popup=folium.Popup(html, max_width=260),
+        icon=folium.Icon(color="blue", icon="home", prefix="fa")
+    ).add_to(marker_cluster)
+
+# Renderiza ocupando tudo (sem margens feias)
+st_folium(m, width=None, height=700)
+
+# Contador flutuante
+st.info(f"Mostrando {len(df)} oportunidades em tempo real.")
