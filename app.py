@@ -2,139 +2,99 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import folium
+from folium.plugins import MarkerCluster # A mágica da performance
 from streamlit_folium import st_folium
 
-# 1. Configuração Visual
-st.set_page_config(
-    page_title="Receita Imob | Inteligência Imobiliária",
-    page_icon="🏠",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Receita Imob", page_icon="🏠", layout="wide")
 
-# Estilo CSS
-st.markdown("""
-    <style>
-    .main {background-color: #f9f9f9;}
-    h1 {color: #2c3e50;}
-    .stButton>button {
-        width: 100%;
-        background-color: #ff4b4b;
-        color: white;
-        border-radius: 5px;
-        height: 3em;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# CSS para esconder menu e melhorar visual
+st.markdown("""<style>.main {background-color:#f4f6f9;} header {visibility: hidden;}</style>""", unsafe_allow_html=True)
 
-# 2. Conexão Segura
 @st.cache_resource
 def init_connection():
     try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
+        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     except:
         return None
 
 supabase = init_connection()
 
-# --- CABEÇALHO ---
-col_logo, col_text = st.columns([1, 4])
-with col_logo:
-    st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=80)
-with col_text:
-    st.title("Receita Imob")
-    st.markdown("**Encontramos o seu imóvel antes de ele ser anunciado.** Nossa inteligência artificial monitora o mercado 24h por dia.")
+# Header
+col1, col2 = st.columns([1, 6])
+with col1: st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=70)
+with col2: 
+    st.title("Receita Consensual Imob")
+    st.caption("Inteligência Artificial aplicada ao Arrendamento")
 
-st.divider()
+# --- LÓGICA DO MAPA ---
+st.subheader("🗺️ Mapa de Oportunidades")
 
-# --- COLUNAS PRINCIPAIS ---
-col_mapa, col_premium = st.columns([2, 1])
+df = pd.DataFrame()
+if supabase:
+    try:
+        # Pega mais imóveis (500) porque o Cluster aguenta!
+        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(500).execute()
+        df = pd.DataFrame(response.data)
+    except:
+        pass
 
-# --- ÁREA 1: O MAPA ---
-with col_mapa:
-    st.subheader("📍 Monitoramento em Tempo Real")
+if not df.empty:
+    # Centraliza o mapa
+    lat_c = df['lat'].mean() if 'lat' in df.columns else 39.5
+    lon_c = df['lon'].mean() if 'lon' in df.columns else -8.0
     
-    df = pd.DataFrame()
-    if supabase:
-        try:
-            # Pega os últimos 100 imóveis para o mapa não ficar pesado
-            response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(100).execute()
-            df = pd.DataFrame(response.data)
-        except:
-            pass
-
-    if not df.empty:
-        # Centraliza o mapa
-        lat_centro = df['lat'].mean() if 'lat' in df.columns and len(df) > 0 else 39.5
-        lon_centro = df['lon'].mean() if 'lon' in df.columns and len(df) > 0 else -8.0
-        
-        m = folium.Map(location=[lat_centro, lon_centro], zoom_start=7)
-
-        for index, row in df.iterrows():
-            lat, lon = row.get('lat'), row.get('lon')
-            # Só plota se tiver coordenadas válidas (diferente de 0)
-            if lat and lon and lat != 0:
-                html = f"""
-                <div style='font-family: Arial; width: 180px;'>
-                    <h4 style='margin:0; color:#2c3e50;'>{row.get('titulo', 'Imóvel')}</h4>
-                    <p style='margin:5px 0; font-size:12px;'>📍 {row.get('endereco', '')}</p>
-                    <p style='margin:5px 0; font-weight:bold; color:#27ae60;'>€ {row.get('preco', 'Sob Consulta')}</p>
-                    <a href='{row.get('link', '#')}' target='_blank' style='display:block; background:#ff4b4b; color:white; text-align:center; padding:5px; text-decoration:none; border-radius:4px; font-size:12px;'>Ver Detalhes</a>
-                </div>
-                """
-                folium.Marker(
-                    [lat, lon],
-                    popup=html,
-                    icon=folium.Icon(color="red", icon="home")
-                ).add_to(m)
-
-        st_folium(m, width=None, height=500)
-    else:
-        st.info("📡 Calibrando satélites... O mapa será atualizado assim que o Bot encontrar novos imóveis.")
-
-# --- ÁREA 2: CADASTRO PREMIUM (EMAIL) ---
-with col_premium:
-    st.container(border=True)
-    st.markdown("### 💎 Receba Alertas por E-mail")
-    st.write("Selecione múltiplas opções e receba tudo na sua caixa de entrada.")
+    # Cria o mapa base (Mais limpo)
+    m = folium.Map(location=[lat_c, lon_c], zoom_start=6, tiles="CartoDB positron")
     
-    with st.form("form_cadastro"):
-        nome = st.text_input("Seu Nome")
-        email = st.text_input("Seu Melhor E-mail")
-        zona = st.text_input("Cidade ou Bairro", placeholder="Ex: Figueira da Foz")
-        
-        # MUDANÇA AQUI: Multiselect em vez de Selectbox
-        tipos = st.multiselect(
-            "O que procura? (Selecione vários)", 
-            ["Apartamento T1", "Apartamento T2", "Apartamento T3", "Apartamento T4+", "Casa/Moradia", "Quarto"],
-            default=["Apartamento T2"]
-        )
-        
-        btn_assinar = st.form_submit_button("🚀 Ativar Alertas Personalizados")
-        
-        if btn_assinar and supabase:
-            if email and zona and tipos:
-                # Junta a lista ["T2", "T3"] numa string "Apartamento T2 Apartamento T3 Figueira da Foz"
-                tipos_texto = " ".join(tipos)
-                termo_busca = f"{tipos_texto} {zona}"
-                
-                dados = {
-                    "user_id": email,
-                    "termo_busca": termo_busca,
-                    "plano": "waitlist",
-                    "ativo": True
-                }
-                try:
-                    supabase.table("alertas_clientes").insert(dados).execute()
-                    st.success(f"Configurado! Vamos buscar por **{tipos_texto}** em **{zona}**.")
-                    st.balloons()
-                except Exception as e:
-                    st.error("Erro ao cadastrar. Verifique se o e-mail já está na lista.")
-            else:
-                st.warning("Preencha todos os campos para garantirmos a melhor busca.")
+    # CRIA O AGRUPAMENTO (CLUSTERING)
+    marker_cluster = MarkerCluster().add_to(m)
 
-# --- RODAPÉ ---
-st.markdown("---")
-st.markdown("<center><small>Receita Consensual Imob © 2026</small></center>", unsafe_allow_html=True)
+    for index, row in df.iterrows():
+        lat, lon = row.get('lat'), row.get('lon')
+        if lat and lon and lat != 0:
+            
+            # HTML DO POPUP COM FOTO
+            img_html = f"<img src='{row['imagem']}' width='100%' style='border-radius:4px; margin-bottom:5px;'>" if row.get('imagem') else ""
+            
+            html = f"""
+            <div style='width: 220px; font-family: sans-serif;'>
+                {img_html}
+                <h5 style='margin:0; color:#2c3e50;'>{row.get('titulo', 'Imóvel')}</h5>
+                <p style='margin:5px 0; font-size:12px; color:#7f8c8d;'>📍 {row.get('endereco', '')}</p>
+                <a href='{row.get('link', '#')}' target='_blank' style='display:block; background:#ff4b4b; color:white; text-align:center; padding:8px; text-decoration:none; border-radius:4px; font-size:12px; font-weight:bold;'>Ver Anúncio Completo</a>
+            </div>
+            """
+            
+            folium.Marker(
+                [lat, lon],
+                popup=html,
+                icon=folium.Icon(color="red", icon="home")
+            ).add_to(marker_cluster) # Adiciona ao Cluster, não direto ao mapa
+
+    st_folium(m, width=None, height=600)
+
+else:
+    st.info("Aguardando dados do satélite...")
+
+# --- BARRA LATERAL (BUSCA GLOBAL) ---
+st.sidebar.header("🔎 Nova Busca")
+st.sidebar.info("Não achou o que queria no mapa? Peça para o Robô buscar agora.")
+
+with st.sidebar.form("nova_busca"):
+    nome = st.text_input("Nome")
+    email = st.text_input("E-mail")
+    # Aqui o usuário digita QUALQUER lugar
+    busca_livre = st.text_input("O que você procura?", placeholder="Ex: T2 em Coimbra perto do Rio")
+    
+    enviar = st.form_submit_button("🚀 Iniciar Rastreamento")
+    
+    if enviar and supabase:
+        if email and busca_livre:
+            supabase.table("alertas_clientes").insert({
+                "user_id": email,
+                "termo_busca": busca_livre,
+                "ativo": True,
+                "plano": "site"
+            }).execute()
+            st.sidebar.success(f"O Robô começou a varrer a internet por: **{busca_livre}**")
+            st.sidebar.warning("Volte em 15 minutos para ver os resultados no mapa!")
