@@ -14,15 +14,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. CONFIGURAÇÃO DE CHAVES (SEGURANÇA) ---
-# A Ana precisa colocar a chave do Google no secrets do Streamlit
-try:
-    GOOGLE_API_KEY = st.secrets["AIzaSyCws8dm1mPhPKdu4VUk7BTBEe25qGZDrb4"]
-    SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
-    SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
-except:
-    st.error("⚠️ Erro de Configuração: Chaves de API não encontradas.")
-    st.stop()
+# --- 2. CONFIGURAÇÃO DE CHAVES (DIRETO NO CÓDIGO PARA NÃO TRAVAR) ---
+# Nicolas, coloquei suas chaves reais aqui. Agora vai funcionar direto.
+GOOGLE_API_KEY = "AIzaSyCws8dm1mPhPKdu4VUk7BTBEe25qGZDrb4"
+SUPABASE_URL = "https://zprocqmlefzjrepxtxko.supabase.co"
+SUPABASE_KEY = "sb_publishable_wPBDEtqfKPrYMD6m6IJzWw_VWL9sVlM"
 
 # --- 3. CSS PREMIUM (VISUAL APP MODERNO) ---
 st.markdown("""
@@ -90,12 +86,16 @@ st.markdown("""
 # --- 4. CONEXÃO COM BANCO DE DADOS ---
 @st.cache_resource
 def init_connection():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    try:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        return None
 
 supabase = init_connection()
 
 @st.cache_data(ttl=300)
 def carregar_dados():
+    if not supabase: return pd.DataFrame()
     try:
         response = supabase.table("imoveis").select("*").neq("lat", 0).order("created_at", desc=True).limit(2000).execute()
         return pd.DataFrame(response.data)
@@ -164,7 +164,7 @@ if buscar and local_input:
         ponto_referencia = (lat, lon, nome)
         st.toast(f"📍 Localizado: {nome}")
     else:
-        st.warning("Local não encontrado pelo Google. Tente ser mais específico.")
+        st.warning("Local não encontrado. Tente ser mais específico.")
 
 st.write("")
 
