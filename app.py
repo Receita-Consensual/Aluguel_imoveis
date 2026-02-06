@@ -2,46 +2,80 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import folium
-from folium.plugins import MarkerCluster, LocateControl, Geocoder
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
-from geopy.distance import geodesic
 
-# --- 1. CONFIGURAÇÃO VISUAL (ESTILO APP) ---
+# --- 1. CONFIGURAÇÃO VISUAL PREMIUM ---
 st.set_page_config(
-    page_title="Receita Imob App",
+    page_title="Receita Imob",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# CSS PROFISSIONAL (Remove bordas, estiliza botões)
+# CSS CUSTOMIZADO (CARD STYLE)
 st.markdown("""
     <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0rem; padding-left: 1rem; padding-right: 1rem;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stButton>button {
-        background-color: #2e86de;
-        color: white;
-        border-radius: 20px;
-        border: none;
-        height: 3em;
+    /* Fundo geral */
+    .main {background-color: #f8f9fa;}
+    
+    /* Estilo dos Cards de Imóveis */
+    .imovel-card {
+        background-color: white;
+        border-radius: 12px;
+        padding: 0px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
+        transition: transform 0.2s;
+        border: 1px solid #e0e0e0;
+        overflow: hidden;
+    }
+    .imovel-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+    }
+    .card-img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+    }
+    .card-body {
+        padding: 15px;
+    }
+    .price-tag {
+        color: #2c3e50;
+        font-weight: 800;
+        font-size: 1.2rem;
+    }
+    .location-tag {
+        color: #7f8c8d;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .btn-ver {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        background-color: #ff5a5f; /* Cor Airbnb */
+        color: white !important;
+        text-align: center;
+        border-radius: 8px;
+        text-decoration: none;
         font-weight: bold;
-        box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+        margin-top: 10px;
     }
-    .stTextInput>div>div>input {
-        border-radius: 20px;
+    .btn-ver:hover {
+        background-color: #e04e53;
     }
-    /* Card flutuante de métrica */
-    div[data-testid="stMetricValue"] {
-        font-size: 24px;
-        color: #2e86de;
-    }
+    
+    /* Ajuste do Mapa */
+    iframe {border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXÃO BACKEND ---
+# --- 2. CONEXÃO ---
 @st.cache_resource
 def init_connection():
     try:
@@ -51,161 +85,145 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- 3. LÓGICA DE GEOLOCALIZAÇÃO (O "GOOGLE" GRATUITO) ---
-def encontrar_coordenadas(endereco):
-    geolocator = Nominatim(user_agent="receita_imob_app")
-    try:
-        # Força busca em Portugal para evitar erros
-        loc = geolocator.geocode(f"{endereco}, Portugal")
-        if loc:
-            return loc.latitude, loc.longitude
-        return None, None
-    except:
-        return None, None
+# --- 3. BARRA LATERAL (FILTROS) ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=60)
+st.sidebar.title("Filtros")
 
-# --- 4. INTERFACE PRINCIPAL ---
+# Filtro de Cidade (Pega do banco as cidades disponíveis)
+cidades_disponiveis = ["Todas"]
+df_raw = pd.DataFrame()
 
-# Título flutuante
-col_logo, col_search = st.columns([1, 6])
-with col_logo:
-    st.image("https://cdn-icons-png.flaticon.com/512/1040/1040993.png", width=60)
-with col_search:
-    st.markdown("### 🇵🇹 Receita Imob | Portugal")
-
-# BARRA DE BUSCA INTELIGENTE (TIPO AIRBNB/GOOGLE)
-with st.container(border=True):
-    col_input, col_raio, col_btn = st.columns([4, 2, 1])
-    
-    with col_input:
-        busca_local = st.text_input("📍 Onde você vai trabalhar/estudar?", placeholder="Ex: Hospital de Aveiro, Torre dos Clérigos, Shopping Vasco da Gama")
-    
-    with col_raio:
-        raio_km = st.slider("Raio de busca (km)", 1, 20, 3)
-    
-    with col_btn:
-        st.write("") # Espaçamento
-        buscar = st.button("🔍 Buscar")
-
-# --- 5. PROCESSAMENTO DO MAPA ---
-
-# Valores padrão (Centro de Portugal)
-map_center = [39.55, -7.84] 
-zoom_level = 6
-imoveis_filtrados = pd.DataFrame()
-
-# Carrega TODOS os imóveis do banco (Cache para ser rápido)
 if supabase:
     try:
-        # Pega até 1000 imóveis para cobrir o país todo
-        response = supabase.table("imoveis").select("*").limit(1000).execute()
-        df_imoveis = pd.DataFrame(response.data)
+        # Pega tudo para filtrar no pandas (mais rápido para poucos dados < 10k)
+        response = supabase.table("imoveis").select("*").order("created_at", desc=True).limit(1000).execute()
+        df_raw = pd.DataFrame(response.data)
+        
+        if not df_raw.empty and 'endereco' in df_raw.columns:
+            # Tenta extrair cidades unicas (simplificado)
+            unique_cities = df_raw['endereco'].unique().tolist()
+            cidades_disponiveis += unique_cities
     except:
-        df_imoveis = pd.DataFrame()
+        pass
 
-# Lógica da Busca
-ponto_referencia = None
+filtro_cidade = st.sidebar.selectbox("Cidade / Zona", cidades_disponiveis)
+filtro_preco = st.sidebar.slider("Preço Máximo (€)", 300, 3000, 1500, step=50)
 
-if buscar and busca_local:
-    lat_busca, lon_busca = encontrar_coordenadas(busca_local)
+st.sidebar.divider()
+st.sidebar.markdown("### 💎 Acesso Premium")
+st.sidebar.info("Receba alertas no e-mail assim que um imóvel novo aparecer.")
+with st.sidebar.form("lead_magnet"):
+    email_lead = st.text_input("Seu E-mail")
+    zona_lead = st.text_input("Cidade de Interesse")
+    btn_lead = st.form_submit_button("Ativar Alertas")
+    if btn_lead and supabase and email_lead:
+        supabase.table("alertas_clientes").insert({
+            "user_id": email_lead, "termo_busca": zona_lead, "ativo": True, "plano": "site_sidebar"
+        }).execute()
+        st.sidebar.success("✅ Ativado!")
+
+# --- 4. LÓGICA DE DADOS ---
+df_filtrado = df_raw.copy()
+
+if not df_filtrado.empty:
+    # 1. Filtra Cidade
+    if filtro_cidade != "Todas":
+        df_filtrado = df_filtrado[df_filtrado['endereco'] == filtro_cidade]
     
-    if lat_busca:
-        map_center = [lat_busca, lon_busca]
-        zoom_level = 14 # Zoom bem perto
-        ponto_referencia = (lat_busca, lon_busca)
-        st.success(f"Mostrando imóveis a {raio_km}km de: **{busca_local}**")
+    # 2. Filtra Preço (Remove quem tem preço 0 se quiser, ou mantem como "Consultar")
+    # Vamos considerar preço 0 como "dentro" pois pode ser "Sob Consulta"
+    df_filtrado = df_filtrado[
+        (df_filtrado['preco'] <= filtro_preco) | (df_filtrado['preco'] == 0) | (df_filtrado['preco'].isnull())
+    ]
+
+# --- 5. LAYOUT PRINCIPAL ---
+
+col_title, col_metric = st.columns([3, 1])
+with col_title:
+    st.title("Receita Imob Portugal")
+    st.caption("Monitoramento em tempo real de Idealista, Imovirtual e CustoJusto.")
+with col_metric:
+    if not df_filtrado.empty:
+        st.metric("Imóveis Encontrados", len(df_filtrado))
+
+# ABA 1: MAPA
+# ABA 2: GALERIA (CARDS)
+tab_mapa, tab_galeria = st.tabs(["🗺️ Visualizar no Mapa", "🏡 Visualizar em Lista"])
+
+with tab_mapa:
+    if not df_filtrado.empty:
+        # Calcula centro dinâmico baseado nos dados filtrados
+        lat_mean = df_filtrado['lat'].mean()
+        lon_mean = df_filtrado['lon'].mean()
+        
+        m = folium.Map(location=[lat_mean, lon_mean], zoom_start=6, tiles="CartoDB positron")
+        
+        # Auto-Zoom (Fit Bounds)
+        sw = df_filtrado[['lat', 'lon']].min().values.tolist()
+        ne = df_filtrado[['lat', 'lon']].max().values.tolist()
+        if sw != ne: # Só ajusta se tiver pontos distantes
+            m.fit_bounds([sw, ne])
+
+        marker_cluster = MarkerCluster().add_to(m)
+
+        for _, row in df_filtrado.iterrows():
+            if row['lat'] and row['lon']:
+                # Preço Formatado
+                preco_txt = f"€ {row['preco']:,.0f}" if row.get('preco') and row['preco'] > 0 else "Sob Consulta"
+                img_url = row.get('imagem') if row.get('imagem') else "https://via.placeholder.com/300x200.png?text=Sem+Foto"
+                
+                html = f"""
+                <div style="width:200px">
+                    <img src="{img_url}" style="width:100%; height:120px; object-fit:cover; border-radius:8px 8px 0 0;">
+                    <div style="padding:5px">
+                        <b>{preco_txt}</b><br>
+                        <span style="font-size:12px">{row.get('titulo', '')[:40]}...</span><br>
+                        <a href="{row.get('link')}" target="_blank" style="color:#ff5a5f; font-weight:bold; text-decoration:none;">Ver Anúncio</a>
+                    </div>
+                </div>
+                """
+                folium.Marker(
+                    [row['lat'], row['lon']],
+                    popup=html,
+                    icon=folium.Icon(color="red", icon="home")
+                ).add_to(marker_cluster)
+
+        st_folium(m, width=None, height=500)
     else:
-        st.error("Local não encontrado em Portugal. Tente ser mais específico.")
+        st.warning("Nenhum imóvel encontrado com estes filtros.")
 
-# Filtro de Distância (Matemática Espacial)
-if not df_imoveis.empty and ponto_referencia:
-    # Calcula distância de cada imóvel para o ponto de busca
-    # Nota: Precisamos converter lat/lon para float
-    df_imoveis['lat'] = df_imoveis['lat'].astype(float)
-    df_imoveis['lon'] = df_imoveis['lon'].astype(float)
-    
-    def calc_dist(row):
-        if row['lat'] == 0: return 9999 # Ignora imóveis sem coord
-        return geodesic(ponto_referencia, (row['lat'], row['lon'])).km
-
-    df_imoveis['distancia'] = df_imoveis.apply(calc_dist, axis=1)
-    
-    # Filtra só os pertos
-    imoveis_filtrados = df_imoveis[df_imoveis['distancia'] <= raio_km]
-else:
-    imoveis_filtrados = df_imoveis # Se não buscou, mostra tudo
-
-# --- 6. RENDERIZAÇÃO DO MAPA ---
-
-m = folium.Map(location=map_center, zoom_start=zoom_level, tiles="CartoDB positron")
-
-# Adiciona o Ponto de Referência (Trabalho/Escola)
-if ponto_referencia:
-    folium.Marker(
-        ponto_referencia,
-        popup=f"📍 {busca_local}",
-        icon=folium.Icon(color="black", icon="briefcase", prefix="fa")
-    ).add_to(m)
-    
-    # Desenha o círculo do raio
-    folium.Circle(
-        location=ponto_referencia,
-        radius=raio_km * 1000, # Metros
-        color="#2e86de",
-        fill=True,
-        fill_opacity=0.1
-    ).add_to(m)
-
-# Agrupamento de Imóveis
-marker_cluster = MarkerCluster().add_to(m)
-
-if not imoveis_filtrados.empty:
-    for _, row in imoveis_filtrados.iterrows():
-        lat, lon = row.get('lat'), row.get('lon')
-        if lat and lon and lat != 0:
+with tab_galeria:
+    if not df_filtrado.empty:
+        # Grid System (3 colunas)
+        cols = st.columns(3)
+        for i, (index, row) in enumerate(df_filtrado.iterrows()):
+            # Imagem Placeholder se não tiver
+            img = row.get('imagem')
+            if not img or str(img) == 'nan': 
+                img = "https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=60" # Foto genérica bonita
             
-            # Foto
-            img_html = f"<img src='{row['imagem']}' width='100%' style='border-radius:8px; margin-bottom:8px;'>" if row.get('imagem') else ""
-            preco = f"€ {row.get('preco')}" if row.get('preco') > 0 else "Consultar"
+            preco = f"€ {row['preco']:,.0f}" if row.get('preco') and row['preco'] > 0 else "Sob Consulta"
+            titulo = row.get('titulo', 'Imóvel sem título')
+            local = row.get('endereco', 'Portugal')
+            link = row.get('link', '#')
             
-            # Popup Estilo Card
-            html = f"""
-            <div style='width: 240px; font-family: "Helvetica Neue", Arial, sans-serif; overflow: hidden;'>
-                {img_html}
-                <div style='padding: 5px;'>
-                    <h4 style='margin:0; color:#2c3e50; font-size: 16px;'>{row.get('titulo', 'Imóvel')}</h4>
-                    <p style='margin:4px 0; color:#27ae60; font-weight:bold; font-size: 14px;'>{preco}</p>
-                    <p style='margin:4px 0; font-size:12px; color:#7f8c8d;'>📍 {row.get('endereco', '')}</p>
-                    <a href='{row.get('link', '#')}' target='_blank' style='display:block; background-color:#ff4b4b; color:white; text-align:center; padding:10px; text-decoration:none; border-radius:20px; font-size:12px; font-weight:bold; margin-top:10px;'>Ver Imóvel</a>
+            # HTML do Card
+            card_html = f"""
+            <div class="imovel-card">
+                <img src="{img}" class="card-img">
+                <div class="card-body">
+                    <div class="price-tag">{preco}</div>
+                    <div style="height: 3em; overflow: hidden; margin-bottom: 5px;">
+                        <strong>{titulo}</strong>
+                    </div>
+                    <div class="location-tag">📍 {local}</div>
+                    <a href="{link}" target="_blank" class="btn-ver">Ver Detalhes</a>
                 </div>
             </div>
             """
             
-            folium.Marker(
-                [lat, lon],
-                popup=html,
-                icon=folium.Icon(color="red", icon="home")
-            ).add_to(marker_cluster)
-
-# Botão de Geolocalização do Usuário (Mobile)
-LocateControl().add_to(m)
-
-# Exibe o mapa ocupando a largura total
-st_folium(m, width=None, height=700)
-
-# --- RODAPÉ INTELIGENTE ---
-if imoveis_filtrados.empty and busca_local:
-    st.warning("⚠️ Não encontramos imóveis nesta área ainda.")
-    with st.expander("🔔 Quero ser avisado quando aparecer algo aqui!"):
-        with st.form("alert_missing"):
-            email_aviso = st.text_input("Seu E-mail")
-            st.write(f"Criar alerta para: **{busca_local}** (+{raio_km}km)")
-            submit_aviso = st.form_submit_button("Criar Alerta Automático")
-            
-            if submit_aviso and email_aviso and supabase:
-                supabase.table("alertas_clientes").insert({
-                    "user_id": email_aviso,
-                    "termo_busca": f"Imóveis perto de {busca_local}",
-                    "ativo": True,
-                    "plano": "map_request"
-                }).execute()
-                st.success("Feito! Nosso robô vai começar a monitorar essa área agora.")
+            # Distribui nas colunas (0, 1, 2)
+            with cols[i % 3]:
+                st.markdown(card_html, unsafe_allow_html=True)
+    else:
+        st.info("Ajuste os filtros para ver os imóveis.")
